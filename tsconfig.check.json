@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2022",
+    "rootDir": "src/lib",
+    "outDir": ".tmp-check",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler"
+  },
+  "files": ["src/lib/selfcheck.ts"]
+}
