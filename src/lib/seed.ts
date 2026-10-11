@@ -28,12 +28,14 @@ export function sampleData(youId: string) {
     P('tara', 'Tara Kapoor', 'TK'),
   ];
   const G = (key: string, name: string, icon: string, members: string[], note: string): Group => ({
-    id: id(key), name, icon, memberIds: members.map(id), note, sample: true,
+    id: id(key), name, icon, memberIds: members.map(id), note, sample: true, kind: 'group',
   });
-  const groups = [
+  const groups: Group[] = [
     G('goa', 'Goa trip', 'beach', ['aarav', 'meera', 'kabir'], '18-22 Sep'),
     G('flat', 'Flat 402', 'office-building', ['riya', 'kabir'], 'Shared home'),
     G('lunch', 'Friday lunches', 'silverware-fork-knife', ['aarav', 'ishaan', 'tara'], 'Office'),
+    // A quick split: one bill paid for a friend, no trip or flat around it.
+    { ...G('cab', 'Airport cab', 'call-split', ['tara'], ''), kind: 'split' },
   ];
   const base = { income: false, transfer: false, recurring: null, recurId: null, groupId: null, payerId: null, shares: null, reflect: true, sample: true };
   const solo = (p: Partial<Expense> & Pick<Expense, 'merchant' | 'amount' | 'at' | 'tag' | 'rail'> & { key: string }): Expense => {
@@ -83,6 +85,7 @@ export function sampleData(youId: string) {
     ge('f3', 'Groceries restock', 2460, 8, 'groceries', 'upi', 'flat', 'kabir', flat),
     ge('l1', 'Bombay Canteen', 2480, 19, 'food', 'upi', 'lunch', 'you', lunch),
     ge('l2', 'Meghana Foods', 1920, 12, 'food', 'upi', 'lunch', 'ishaan', lunch),
+    ge('c1', 'Airport cab', 900, 27, 'transport', 'upi', 'cab', 'you', ['you', 'tara']),
   ];
   const S = (key: string, group: string, from: string, to: string, amount: number, day: number, method: Settlement['method']): Settlement => ({
     id: id(key), groupId: id(group), fromId: id(from), toId: id(to), amount, at: localNoon(2026, 9, day), method, sample: true,

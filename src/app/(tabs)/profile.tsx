@@ -8,7 +8,6 @@ import { accountsFrom } from '@/lib/ledger';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
-import { maskVpa } from '@/lib/upi';
 
 export default function Profile() {
   const c = usePalette();
@@ -18,16 +17,6 @@ export default function Profile() {
   const [name, setName] = useState(store.you.name);
   const [budget, setBudget] = useState(store.budget ? String(store.budget) : '');
   const accounts = accountsFrom(store.expenses);
-  const [editVpa, setEditVpa] = useState(false);
-  const [vpaDraft, setVpaDraft] = useState('');
-  const [vpaError, setVpaError] = useState<string | null>(null);
-
-  const saveVpa = () => {
-    const err = store.setVpa(vpaDraft);
-    if (err) return setVpaError(err);
-    setEditVpa(false);
-  };
-
   const scan = async () => {
     const result = await readDeviceSms();
     if (result.error === 'ios') return store.flash(Platform.OS === 'ios' ? 'On iOS, bank SMS arrive through Shortcuts' : 'Inbox reading works in the Android app');
@@ -68,55 +57,8 @@ export default function Profile() {
         </Row>
       </Press>
 
-      <Label>Get paid</Label>
-      {editVpa ? (
-        <View style={{ gap: 10, paddingVertical: 8 }}>
-          <TextInput
-            value={vpaDraft}
-            onChangeText={(v) => { setVpaDraft(v); setVpaError(null); }}
-            placeholder="name@bank"
-            placeholderTextColor={c.mut}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-            keyboardType="email-address"
-            onSubmitEditing={saveVpa}
-            style={{ height: 52, borderRadius: 16, borderWidth: 1, borderColor: vpaError ? c.neg : c.line, paddingHorizontal: 16, fontFamily: font.body, fontSize: 16, color: c.fg }}
-          />
-          {vpaError ? <Text style={{ fontFamily: font.body, fontSize: 12, color: c.neg }}>{vpaError}</Text> : null}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Press onPress={saveVpa} style={{ height: 40, paddingHorizontal: 18, borderRadius: 20, backgroundColor: c.acc, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 13.5 }}>Save</Text>
-            </Press>
-            <Press onPress={() => { setEditVpa(false); setVpaError(null); }} style={{ height: 40, paddingHorizontal: 16, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: font.medium, color: c.mut, fontSize: 13.5 }}>Cancel</Text>
-            </Press>
-          </View>
-        </View>
-      ) : (
-        store.you.vpa ? (
-          <Row icon="qrcode" title={maskVpa(store.you.vpa)} sub="Friends can pay you by UPI">
-            <Press onPress={() => { setVpaDraft(store.you.vpa ?? ''); setEditVpa(true); }} style={{ height: 34, paddingHorizontal: 10, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 12.5 }}>Change</Text>
-            </Press>
-            <Press onPress={() => ask({ title: 'Remove your UPI ID?', body: 'Friends will only be able to mark payments to you by hand.', confirm: 'Remove', destructive: true, onConfirm: () => store.setVpa('') })} style={{ height: 34, paddingHorizontal: 10, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: font.medium, color: c.mut, fontSize: 12.5 }}>Remove</Text>
-            </Press>
-          </Row>
-        ) : (
-          <Press onPress={() => { setVpaDraft(''); setEditVpa(true); }}>
-            <Row icon="qrcode" title="Add your UPI ID" sub="Without it, friends settle with you by hand">
-              <Icon name="chevron-right" size={20} color={c.mut} />
-            </Row>
-          </Press>
-        )
-      )}
-      <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 10, lineHeight: 18 }}>
-        Stored encrypted on the server and shown only to people in your groups, when they settle up with you.
-      </Text>
-
       <Label>SMS import</Label>
-      <Row icon="message-text-outline" title="Read bank SMS" sub={store.smsOn ? 'Checks the inbox each time you open kakie.' : 'Off'}>
+      <Row icon="message-text-outline" title="Read bank SMS" sub={store.smsOn ? 'Checks the inbox each time you open Kakei.' : 'Off'}>
         <Switch value={store.smsOn} onValueChange={(on) => { store.setSmsOn(on); if (on) scan(); }} trackColor={{ true: c.acc, false: c.bar }} />
       </Row>
       <Press onPress={scan}>
@@ -164,6 +106,13 @@ export default function Profile() {
           <Row icon="flask-outline" title="Load sample data" sub="Three groups and a month of spends to explore" />
         </Press>
       )}
+
+      <Label>Developer</Label>
+      <Press onPress={() => router.push('/developer')}>
+        <Row icon="server-outline" title="MCP server" sub={store.dev.mcp ? 'On. Your data is served from this phone' : 'Serve your data from this phone to AI tools'}>
+          <Icon name="chevron-right" size={20} color={c.mut} />
+        </Row>
+      </Press>
 
       <Press onPress={signOut} style={{ marginTop: 28 }}>
         <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>Sign out</Text>

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
@@ -20,14 +20,6 @@ function fail(status: number, message: string): never {
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
 const RAILS = new Set(['upi', 'debit', 'credit', 'neft', 'imps', 'cash']);
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const VPA = /^[a-z0-9][a-z0-9._-]{1,63}@[a-z][a-z0-9]{1,31}$/;
-
-function vpaOf(v: unknown) {
-  if (v == null || v === '') return null;
-  const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
-  if (!VPA.test(s)) fail(400, 'Enter a UPI ID like name@bank');
-  return s;
-}
 
 function text(v: unknown, max: number, field: string) {
   if (typeof v !== 'string' || !v.trim() || v.length > max) fail(400, `${field} is invalid`);
@@ -96,29 +88,11 @@ async function readBody(req: IncomingMessage): Promise<Row> {
   return obj(parsed, 'body');
 }
 
-export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer }) {
+export function createApp(db: DatabaseSync, opts: { cors: string }) {
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).all(...args) as Row[];
   const run = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).run(...args);
 
-  // UPI IDs are AES-256-GCM sealed at rest, bound to the owning user id so a ciphertext can't be moved to another row.
-  const seal = (plain: string, userId: string) => {
-    const iv = randomBytes(12);
-    const c = createCipheriv('aes-256-gcm', opts.key, iv).setAAD(Buffer.from(userId));
-    const body = Buffer.concat([c.update(plain, 'utf8'), c.final()]);
-    return Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
-  };
-  const unseal = (sealed: unknown, userId: string) => {
-    if (typeof sealed !== 'string' || !sealed) return null;
-    try {
-      const b = Buffer.from(sealed, 'base64');
-      const d = createDecipheriv('aes-256-gcm', opts.key, b.subarray(0, 12)).setAAD(Buffer.from(userId));
-      d.setAuthTag(b.subarray(12, 28));
-      return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
-    } catch {
-      return null;
-    }
-  };
   // ponytail: in-memory lockout, resets on restart and is per process. Move to the DB if you run several instances.
   const fails = new Map<string, { n: number; until: number }>();
 
@@ -163,14 +137,10 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer })
     const phone = phoneOf(body.phone);
     const pass = typeof body.password === 'string' ? body.password : '';
     if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
-    const vpa = vpaOf(body.vpa);
     if (one('select 1 from users where phone = ?', phone)) fail(409, 'That phone already has an account. Log in instead.');
     const user = { id: newId(), name, phone };
     return tx(() => {
-      run(
-        'insert into users (id, name, phone, pass, created, vpa) values (?, ?, ?, ?, ?, ?)',
-        user.id, name, phone, hashPass(pass), Date.now(), vpa ? seal(vpa, user.id) : null,
-      );
+      run('insert into users (id, name, phone, pass, created) values (?, ?, ?, ?, ?)', user.id, name, phone, hashPass(pass), Date.now());
       run('insert into people (id, name, user_id, created_by) values (?, ?, ?, ?)', user.id, name, user.id, user.id);
       return session(user);
     });
@@ -207,8 +177,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer })
     const groups = all(`select * from groups where id in (${mine}) order by updated desc`, uid);
     const members = all(`select group_id, person_id from members where group_id in (${mine})`, uid);
     const people = all(
-      `select distinct p.id, p.name, p.user_id, u.vpa from people p join members m on m.person_id = p.id
-       left join users u on u.id = p.user_id
+      `select distinct p.id, p.name, p.user_id from people p join members m on m.person_id = p.id
        where m.group_id in (${mine}) and p.id != ?`,
       uid, uid,
     );
@@ -223,13 +192,14 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer })
     const settlements = all(`select data from settlements where group_id in (${mine})`, uid).map((r) => JSON.parse(r.data));
     const prefs = one('select data from prefs where user_id = ?', uid);
     return {
-      you: { ...user, vpa: unseal(one('select vpa from users where id = ?', uid)?.vpa, uid) },
-      people: people.map((p) => ({ id: p.id, name: p.name, claimed: !!p.user_id, vpa: p.user_id ? unseal(p.vpa, p.user_id) : null })),
+      you: user,
+      people: people.map((p) => ({ id: p.id, name: p.name, claimed: !!p.user_id })),
       groups: groups.map((g) => ({
         id: g.id,
         name: g.name,
         icon: g.icon,
         note: g.note,
+        kind: g.kind === 'split' ? 'split' : 'group',
         code: g.code,
         sample: !!g.sample,
         simplify: g.simplify !== 0,
@@ -257,13 +227,15 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer })
         const icon = text(g.icon ?? 'account-group', 40, 'icon');
         const note = typeof g.note === 'string' ? g.note.slice(0, 80) : '';
         const simplify = g.simplify === false ? 0 : 1;
+        // A split is one bill shared between a few people. It is made once and never turned into a full group.
+        const kind = g.kind === 'split' ? 'split' : 'group';
         if (one('select 1 from groups where id = ?', id)) {
           needMember(id, uid);
           run('update groups set name = ?, icon = ?, note = ?, simplify = ?, updated = ? where id = ?', name, icon, note, simplify, Date.now(), id);
         } else {
           run(
-            'insert into groups (id, name, icon, note, code, created_by, sample, simplify, updated) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            id, name, icon, note, freshCode(), uid, g.sample ? 1 : 0, simplify, Date.now(),
+            'insert into groups (id, name, icon, note, kind, code, created_by, sample, simplify, updated) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            id, name, icon, note, kind, freshCode(), uid, g.sample ? 1 : 0, simplify, Date.now(),
           );
           run('insert into members (group_id, person_id) values (?, ?)', id, uid);
         }
@@ -420,10 +392,6 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key: Buffer })
           const name = text(op.name, 40, 'Name');
           run('update users set name = ? where id = ?', name, uid);
           run('update people set name = ? where id = ?', name, uid);
-        }
-        if (op.vpa !== undefined) {
-          const vpa = vpaOf(op.vpa);
-          run('update users set vpa = ? where id = ?', vpa ? seal(vpa, uid) : null, uid);
         }
         return;
       }

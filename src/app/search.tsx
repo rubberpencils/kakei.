@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar, goBack, Icon, Press, TxnRow, useDark, usePalette } from '@/components/ui';
 import { inr } from '@/lib/format';
-import { personName, pocket, remainingOwed } from '@/lib/ledger';
+import { personName, pocket } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
 
@@ -36,8 +36,7 @@ export default function Search() {
         );
       })
       .sort((a, b) => b.at.localeCompare(a.at));
-  const rem = remainingOwed(store.expenses, store.settlements);
-  const spent = expenses.reduce((sum, e) => sum + pocket(e, store.you.id, rem), 0);
+  const spent = expenses.reduce((sum, e) => sum + pocket(e, store.you.id), 0);
   const people = q && tagOnly === null ? store.people.filter((p) => p.name.toLowerCase().includes(q)) : [];
   const groups = q && tagOnly === null ? store.groups.filter((g) => g.name.toLowerCase().includes(q)) : [];
 

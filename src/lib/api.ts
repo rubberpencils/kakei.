@@ -3,7 +3,7 @@ import type { Expense, Group, MonthSnapshot, Settlement } from './types';
 export const DEFAULT_API = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 export type Op =
-  | { type: 'group.upsert'; group: Pick<Group, 'id' | 'name' | 'icon' | 'note'> & { sample?: boolean; simplify?: boolean } }
+  | { type: 'group.upsert'; group: Pick<Group, 'id' | 'name' | 'icon' | 'note'> & { sample?: boolean; simplify?: boolean; kind?: 'group' | 'split' } }
   | { type: 'group.delete'; id: string }
   | { type: 'person.add'; groupId: string; person: { id: string; name: string } }
   | { type: 'expense.upsert'; expense: Expense }
@@ -11,13 +11,13 @@ export type Op =
   | { type: 'settlement.upsert'; settlement: Settlement }
   | { type: 'settlement.delete'; id: string }
   | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[] } }
-  | { type: 'me.set'; name?: string; vpa?: string | null };
+  | { type: 'me.set'; name?: string };
 
 export type Queued = Op & { qid: string };
 
 export type Remote = {
-  you: { id: string; name: string; phone: string; vpa?: string | null };
-  people: { id: string; name: string; claimed: boolean; vpa?: string | null }[];
+  you: { id: string; name: string; phone: string };
+  people: { id: string; name: string; claimed: boolean }[];
   groups: (Omit<Group, 'memberIds'> & { memberIds: string[]; code: string; owner: boolean })[];
   expenses: Expense[];
   settlements: Settlement[];

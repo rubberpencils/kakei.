@@ -61,7 +61,7 @@ export default function PersonScreen() {
             <View style={{ flex: 1 }}>
               <Word size={26} style={{ lineHeight: 30 }}>{isYou ? 'Your activity' : person.name}</Word>
               <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 3 }}>
-                {isYou ? 'Everything you paid for or were split into' : person.claimed ? 'On kakie.' : 'Not on kakie. yet'}
+                {isYou ? 'Everything you paid for or were split into' : person.claimed ? 'On Kakei.' : 'Not on Kakei. yet'}
               </Text>
             </View>
           </View>

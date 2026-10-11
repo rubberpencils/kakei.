@@ -10,7 +10,7 @@ import { friendBalances, groupDebts, personName, youNet } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
 
-type Mode = 'groups' | 'friends';
+type Mode = 'groups' | 'splits' | 'friends';
 
 export default function Groups() {
   const c = usePalette();
@@ -19,12 +19,20 @@ export default function Groups() {
   const insets = useSafeAreaInsets();
   const reduce = useReducedMotion();
   const [view, setView] = useState<Mode>('groups');
+  const real = store.groups.filter((g) => g.kind !== 'split');
+  const splits = store.groups.filter((g) => g.kind === 'split');
   const you = store.you.id;
   const friends = friendBalances(store.expenses, store.settlements, store.groups, you);
   const owed = friends.reduce((s, f) => s + Math.max(0, f.net), 0);
   const owe = friends.reduce((s, f) => s + Math.max(0, -f.net), 0);
   const name = (pid: string) => personName(store.people, store.you, pid);
   const first = (pid: string) => name(pid).split(' ')[0];
+  // A quick split is one bill, so it opens that bill. Anything bigger opens the group page.
+  const open = (gid: string) => {
+    const bills = store.expenses.filter((e) => e.groupId === gid);
+    if (store.groups.find((g) => g.id === gid)?.kind === 'split' && bills.length === 1) router.push({ pathname: '/expense/[id]', params: { id: bills[0].id } });
+    else router.push({ pathname: '/group/[id]', params: { id: gid } });
+  };
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 16, paddingHorizontal: 24, paddingBottom: 120 }}>
@@ -48,18 +56,29 @@ export default function Groups() {
       ) : null}
 
       <View style={{ marginTop: 24 }}>
-        <Segmented<Mode> value={view} onChange={setView} options={[{ id: 'groups', label: 'Groups' }, { id: 'friends', label: 'Friends' }]} />
+        <Segmented<Mode> value={view} onChange={setView} options={[{ id: 'groups', label: 'Groups' }, { id: 'splits', label: 'Splits' }, { id: 'friends', label: 'Friends' }]} />
       </View>
 
       <Animated.View key={view} entering={reduce ? undefined : FadeIn.duration(180)} style={{ marginTop: 8 }}>
-        {view === 'groups'
-          ? store.groups.map((g) => {
+        {view === 'splits' ? (
+          <Press onPress={() => router.push('/quick-split')} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 }}>
+            <View style={{ width: 46, height: 46, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="plus" size={22} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: font.semi, fontSize: 16, color: c.fg }}>New quick split</Text>
+              <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>Or open any expense and tap Split this</Text>
+            </View>
+          </Press>
+        ) : null}
+        {view !== 'friends'
+          ? (view === 'groups' ? real : splits).map((g) => {
               const debts = groupDebts(store.expenses, store.settlements, g);
               const n = youNet(debts, you);
               const mine = debts.filter((d) => d.fromId === you || d.toId === you);
               const color = n.net > 0 ? c.pos : n.net < 0 ? c.neg : c.mut;
               return (
-                <Press key={g.id} onPress={() => router.push({ pathname: '/group/[id]', params: { id: g.id } })} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 14 }}>
+                <Press key={g.id} onPress={() => open(g.id)} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 14 }}>
                   <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: c.sub, alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name={g.icon} size={22} />
                   </View>

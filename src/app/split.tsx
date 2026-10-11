@@ -19,7 +19,8 @@ export default function Split() {
   const insets = useSafeAreaInsets();
   const editing = params.expenseId ? store.expenses.find((e) => e.id === params.expenseId) : undefined;
   const draft = params.draftId ? store.queue.find((d) => d.id === params.draftId) : undefined;
-  const group = store.groups.find((g) => g.id === (editing?.groupId ?? params.groupId)) ?? store.groups[0];
+  const real = store.groups.filter((g) => g.kind !== 'split');
+  const group = store.groups.find((g) => g.id === (editing?.groupId ?? params.groupId)) ?? real[0];
   const members = group ? [store.you.id, ...group.memberIds] : [store.you.id];
   const [desc, setDesc] = useState(editing?.merchant ?? draft?.merchant ?? '');
   const [amt, setAmt] = useState(editing ? String(editing.amount) : draft ? String(draft.amount) : '');
@@ -102,9 +103,9 @@ export default function Split() {
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
       <Back />
       <Word size={28}>{group.name}</Word>
-      {!editing && !draft && store.groups.length > 1 ? (
+      {!editing && !draft && real.length > 1 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
-          {store.groups.map((g) => (
+          {real.map((g) => (
             <Chip key={g.id} label={g.name} on={g.id === group.id} onPress={() => router.setParams({ groupId: g.id })} />
           ))}
         </ScrollView>

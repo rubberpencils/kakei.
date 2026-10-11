@@ -14,10 +14,10 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Back, Body, Button, buzz, Field, Ghost, Icon, Press, Word, Wordmark, useDark, usePalette } from '@/components/ui';
+import { inr } from '@/lib/format';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
-import { cleanVpa } from '@/lib/upi';
 
 const FEATURES = [
   { icon: 'message-text-outline', title: 'Bank SMS, auto-read', body: 'Every debit alert is parsed on this phone. UPI, card, NEFT, IMPS, debit. You confirm each one.' },
@@ -35,6 +35,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1);
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [budget, setBudget] = useState(30000);
   const ios = Platform.OS === 'ios';
 
   const go = (next: number) => {
@@ -80,14 +81,14 @@ export default function Onboarding() {
                 </Animated.View>
                 <Animated.View entering={rise(5)}>
                   <Body color={c.mut} style={{ marginTop: 14, lineHeight: 24, fontSize: 16 }}>
-                    kakie. reads those SMS alerts and turns them into a clean, split-ready ledger.
+                    Kakei. reads those SMS alerts and turns them into a clean, split-ready ledger.
                   </Body>
                 </Animated.View>
               </View>
               <Animated.View entering={rise(6)}>
                 <Dots n={0} />
                 <Button label="Get started" icon="arrow-right" onPress={() => go(1)} />
-                <Ghost label="I already have an account" onPress={() => { setMode('login'); go(3); }} />
+                <Ghost label="I already have an account" onPress={() => { setMode('login'); go(4); }} />
               </Animated.View>
             </View>
           ) : null}
@@ -114,8 +115,8 @@ export default function Onboarding() {
                 <Word size={32} style={{ marginTop: 20, lineHeight: 36 }}>{ios ? 'Set up with Shortcuts' : 'Connect bank SMS'}</Word>
                 <Body color={c.mut} style={{ marginTop: 12, lineHeight: 22 }}>
                   {ios
-                    ? 'iOS does not let apps read SMS. A one-time Shortcuts automation hands bank messages to kakie.'
-                    : 'kakie. scans for bank transactions only. Personal chats are never accessed.'}
+                    ? 'iOS does not let apps read SMS. A one-time Shortcuts automation hands bank messages to Kakei.'
+                    : 'Kakei. scans for bank transactions only. Personal chats are never accessed.'}
                 </Body>
               </Animated.View>
               <ScrollView style={{ flex: 1, marginTop: 24 }} contentContainerStyle={{ gap: 20 }}>
@@ -123,7 +124,7 @@ export default function Onboarding() {
                   <>
                     <StepRow i={2} reduce={reduce} n="01" title='New automation: Message contains "debited"' sub='Make two more for "credited" and "spent"' />
                     <StepRow i={3} reduce={reduce} n="02" title="Action: Open URL kakie://sms?text=" sub="Append the Shortcut Input message to the URL" />
-                    <StepRow i={4} reduce={reduce} n="03" title="Turn on Run Immediately" sub="kakie. parses it here. You confirm before it is saved." />
+                    <StepRow i={4} reduce={reduce} n="03" title="Turn on Run Immediately" sub="Kakei. parses it here. You confirm before it is saved." />
                   </>
                 ) : (
                   <>
@@ -139,18 +140,80 @@ export default function Onboarding() {
             </View>
           ) : null}
 
-          {step === 3 ? <Account mode={mode} setMode={setMode} back={() => go(2)} rise={rise} /> : null}
+          {step === 3 ? <Budget budget={budget} setBudget={setBudget} back={() => go(2)} onNext={() => go(4)} rise={rise} /> : null}
+
+          {step === 4 ? <Account mode={mode} setMode={setMode} budget={mode === 'signup' ? budget : 0} back={() => go(mode === 'login' ? 0 : 3)} rise={rise} /> : null}
         </Animated.View>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
+const BUDGETS = [15000, 30000, 50000, 80000];
+
+function Budget({
+  budget, setBudget, back, onNext, rise,
+}: {
+  budget: number;
+  setBudget: (n: number) => void;
+  back: () => void;
+  onNext: () => void;
+  rise: (i: number) => ReturnType<typeof FadeInDown.delay> | undefined;
+}) {
+  const c = usePalette();
+  const [custom, setCustom] = useState(BUDGETS.includes(budget) ? '' : String(budget));
+  const pick = (n: number) => {
+    setCustom('');
+    setBudget(n);
+  };
+  const typed = Number(custom.replace(/[^0-9]/g, ''));
+  const chosen = custom ? typed : budget;
+  return (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+      <Back to={back} />
+      <Animated.View entering={rise(0)}>
+        <Word size={32} style={{ marginTop: 16, lineHeight: 36 }}>Monthly budget</Word>
+        <Body color={c.mut} style={{ marginTop: 10, lineHeight: 22 }}>
+          Home and Insights use this to show what is left. You can change it later in Profile.
+        </Body>
+      </Animated.View>
+      <Animated.View entering={rise(1)} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 28 }}>
+        {BUDGETS.map((n) => {
+          const on = !custom && budget === n;
+          return (
+            <Press key={n} onPress={() => pick(n)} style={{ height: 42, paddingHorizontal: 16, borderRadius: 21, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
+              <Text style={{ fontFamily: font.medium, fontSize: 14, color: on ? c.accFg : c.fg }}>₹{inr(n)}</Text>
+            </Press>
+          );
+        })}
+      </Animated.View>
+      <Animated.View entering={rise(2)} style={{ marginTop: 20 }}>
+        <Field
+          label="Or type your own"
+          value={custom}
+          onChange={(v) => {
+            const digits = v.replace(/[^0-9]/g, '');
+            setCustom(digits);
+            const n = Number(digits);
+            if (n > 0) setBudget(n);
+          }}
+          placeholder="45000"
+          keyboard="number-pad"
+        />
+      </Animated.View>
+      <View style={{ flex: 1, minHeight: 24 }} />
+      <Dots n={3} />
+      <Button label={chosen > 0 ? `Use ₹${inr(chosen)}` : 'Pick a budget'} onPress={onNext} disabled={!(chosen > 0)} />
+    </ScrollView>
+  );
+}
+
 function Account({
-  mode, setMode, back, rise,
+  mode, setMode, budget, back, rise,
 }: {
   mode: 'signup' | 'login';
   setMode: (m: 'signup' | 'login') => void;
+  budget: number;
   back: () => void;
   rise: (i: number) => ReturnType<typeof FadeInDown.delay> | undefined;
 }) {
@@ -159,8 +222,6 @@ function Account({
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [pass, setPass] = useState('');
-  const [vpa, setVpa] = useState('');
-  const [vpaError, setVpaError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editServer, setEditServer] = useState(false);
@@ -169,15 +230,15 @@ function Account({
 
   const submit = async () => {
     setError(null);
-    setVpaError(null);
     if (mode === 'signup' && !name.trim()) return setError('Add your name so friends recognise you');
-    const upi = mode === 'signup' && vpa.trim() ? cleanVpa(vpa) : null;
-    if (mode === 'signup' && vpa.trim() && !upi) return setVpaError('That does not look like a UPI ID. It has an @, like ananya@okaxis');
     setBusy(true);
-    const err = mode === 'signup' ? await store.signUp(name, phone, pass, upi ?? undefined) : await store.signIn(phone, pass);
+    const err = mode === 'signup' ? await store.signUp(name, phone, pass) : await store.signIn(phone, pass);
     setBusy(false);
     if (err) setError(err);
-    else buzz('done');
+    else {
+      if (mode === 'signup' && budget > 0) store.setBudget(budget);
+      buzz('done');
+    }
   };
 
   const saveServer = async () => {
@@ -200,17 +261,6 @@ function Account({
         {mode === 'signup' ? <Field label="Name" value={name} onChange={setName} placeholder="Ananya Rao" auto="words" /> : null}
         <Field label="Phone" value={phone} onChange={setPhone} placeholder="98765 43210" keyboard="phone-pad" />
         <Field label="Password" value={pass} onChange={setPass} placeholder="At least 6 characters" secure error={error} />
-        {mode === 'signup' ? (
-          <Field
-            label="UPI ID (optional)"
-            value={vpa}
-            onChange={setVpa}
-            placeholder="ananya@okaxis"
-            keyboard="email-address"
-            error={vpaError}
-            hint="Lets friends in your groups pay you in one tap. Leave it empty to settle by hand. You can add it later in Profile."
-          />
-        ) : null}
       </Animated.View>
       <Animated.View entering={rise(2)} style={{ marginTop: 20 }}>
         {editServer ? (
@@ -229,7 +279,7 @@ function Account({
         )}
       </Animated.View>
       <View style={{ flex: 1, minHeight: 24 }} />
-      <Dots n={3} />
+      <Dots n={4} />
       <Button label={busy ? 'One sec' : mode === 'signup' ? 'Create account' : 'Log in'} onPress={submit} disabled={busy} />
       <Ghost
         label={mode === 'signup' ? 'I already have an account' : 'New here? Make an account'}
@@ -304,7 +354,7 @@ function Demo({ reduce }: { reduce: boolean }) {
           <Animated.View entering={reduce ? undefined : FadeInDown.duration(480).easing(soft)} style={{ marginTop: 14 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10, marginLeft: 2 }}>
               <Icon name="auto-fix" size={13} color={c.brand} />
-              <Text style={{ fontFamily: font.medium, fontSize: 11.5, color: c.brand }}>Read by kakie.</Text>
+              <Text style={{ fontFamily: font.medium, fontSize: 11.5, color: c.brand }}>Read by Kakei.</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' }}>
@@ -354,7 +404,7 @@ function Dots({ n }: { n: number }) {
   const c = usePalette();
   return (
     <View style={{ flexDirection: 'row', gap: 5, justifyContent: 'center', marginBottom: 24 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4].map((i) => (
         <Animated.View
           key={i}
           entering={i === n ? FadeIn.duration(200) : undefined}

@@ -5,7 +5,6 @@ export type Person = {
   name: string;
   initials: string;
   claimed?: boolean;
-  vpa?: string | null;
 };
 
 export type Group = {
@@ -18,6 +17,8 @@ export type Group = {
   owner?: boolean;
   sample?: boolean;
   simplify?: boolean;
+  // 'split' is a quick split of one bill. It has no trip or flat context and shows under Splits, not Groups.
+  kind?: 'group' | 'split';
 };
 
 export type Expense = {

@@ -1,56 +1,84 @@
-# Welcome to your Expo app 👋
+# kakie.
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Phone ledger that turns bank SMS into spends, plus a small API so groups share the same balances.
 
-## Get started
+Node **22.18 or newer** (the server uses built-in `node:sqlite`). This machine is on Node 24.
 
-1. Install dependencies
+## 1. Install
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+From the repo root:
 
 ```bash
-npm run reset-project
+npm install
+npm --prefix server install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Local config is copied from the examples (`.env` and `server/.env`). Both are gitignored.
 
-### Other setup steps
+## 2. Start the server
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+npm run server
+```
 
-## Learn more
+Listens on `0.0.0.0:4000`. The log line `phone URL:` is the address a phone on the same Wi-Fi should use.
 
-To learn more about developing your project with Expo, look at the following resources:
+Reload on file changes:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npm --prefix server run dev
+```
 
-## Join the community
+## 3. Start the app
 
-Join our community of developers creating universal apps.
+```bash
+npx expo start
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Expo Go can open the UI. It cannot read bank SMS or run the on-phone MCP server. Both go through the native module `modules/kakie-sms`, which is only in an installed build.
+
+## 4. Build an APK for your phone
+
+Log in once:
+
+```bash
+npx eas-cli@latest login
+```
+
+Then:
+
+```bash
+npx eas-cli@latest build --platform android --profile preview
+```
+
+That profile (`eas.json`) makes an installable APK and bakes in `EXPO_PUBLIC_API_URL`. It is currently `http://10.107.5.250:4000`. Phone and PC must be on the same Wi-Fi.
+
+When the build page says finished, open it on the phone and install the APK.
+
+If the server log shows a different `phone URL`, either update `preview.env.EXPO_PUBLIC_API_URL` in `eas.json` before the next build, or on the account screen tap **Change**, paste that URL, and tap **Test and use**. The in-app change does not need a new build.
+
+## SMS module
+
+Keep `modules/kakie-sms`. Android uses it to read the bank inbox (`readInbox`) and to run the MCP listener (`startMcp`, `stopMcp`, `mcpReply`). iOS does not read the inbox. iOS intake is the Shortcuts flow in onboarding.
+
+## Money, splits and groups
+
+Kakei does not move money. UPI blocks one-tap payments from an app to a person's UPI ID (NPCI rule 7.9), so you pay however you like and tap **Mark as paid** or **Mark as received**.
+
+- **Spend is your share only.** A plain expense counts in full. A split counts only your part. Money you paid for friends and have not got back shows in green after your share (Home bar, Personal, Insights).
+- **Quick split.** Any expense can be split with a few people (**Split this** on the expense, or the Review screen). It becomes a small split under Groups > Splits. It never shows in the Home carousel.
+- **Group.** A trip, a flat or Friday lunches: many bills over time, one running balance. Made from New group.
+
+## Developer: MCP server on your phone
+
+Profile > Developer > **MCP server** turns the phone into a read-only [MCP](https://modelcontextprotocol.io) server (Streamable HTTP, `POST /mcp`, bearer token). Answers are worked out on the phone from its own data. No cloud copy, no relay.
+
+1. Turn it on. Keep the app open. The screen stays awake while it runs.
+2. USB only (default, loopback): plug in the phone and run `adb reverse tcp:8765 tcp:8765`. Wi-Fi: pick **Wi-Fi** and use the address shown.
+3. Tap **Copy MCP config** and paste it into Cursor, Claude Desktop or any HTTP MCP client.
+
+Tools: `get_summary`, `list_transactions`, `spending_by_tag`, `list_groups`, `get_balances`. Never exposed: SMS text, account numbers, phone number, password. Requests with a browser `Origin` header are refused.
+
+## Does it need the server?
+
+Only for shared groups and cross-device sync. The server keeps friends' balances identical on each phone and backs up your data. It no longer holds UPI IDs (the columns are dropped on start). Your own spending, the SMS import, quick splits you do alone and the MCP server all work from the phone.

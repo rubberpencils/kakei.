@@ -1,6 +1,6 @@
 import { parseSms } from './parser';
-import { cleanVpa, readUpiResponse, upiLink } from './upi';
-import { cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify } from './ledger';
+import { cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn } from './ledger';
+import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
 
 function eq(actual: unknown, expected: unknown, msg: string) {
@@ -37,8 +37,8 @@ const dinner: Expense = {
 const sets: Settlement[] = [{ id: 's', groupId: 'goa', fromId: 'aarav', toId: 'ananya', amount: 1200, at: '2026-09-25T12:00:00', method: 'upi' }];
 const rem = remainingOwed([dinner], sets);
 eq(owedBack(dinner, 'ananya', rem), 2400, 'owed');
-eq(pocket(dinner, 'ananya', rem), 3600, 'pocket');
-eq(pocket({ ...dinner, reflect: false }, 'ananya', rem), 0, 'hidden');
+eq(pocket(dinner, 'ananya'), 1200, 'only your share is spend');
+eq(pocket({ ...dinner, reflect: false }, 'ananya'), 0, 'hidden');
 
 const debts = pairDebts([dinner], sets, 'goa');
 eq(debts.find((d) => d.fromId === 'aarav'), undefined, 'aarav settled');
@@ -77,21 +77,46 @@ const lunch: Expense = { ...dinner, id: 'l', groupId: null, payerId: null, share
 const cab: Expense = { ...dinner, id: 'cab', groupId: 'g', payerId: 'me', shares: { me: 50, b: 50 }, amount: 100, at: '2026-10-02T12:00:00' };
 const theirs: Expense = { ...cab, id: 'x', payerId: 'b', shares: { me: 40, b: 40 }, amount: 80 };
 const flow = cashFlow([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'upi' }], 'me', '2026-10-01', '2026-10-31');
-eq(flow.out, 150, 'money out counts the full bill you paid, not bills others paid');
-eq(flow.net, 120, 'repayments come off what you spent');
-eq(flow.owed, 20, 'still coming back');
-eq(flow.real, 100, 'real spend is your own spend plus your share');
-eq(flow.byDay['2026-10-02'], 100, 'calendar shows the full bill on the day you paid');
+eq(flow.spent, 140, 'spend is your own spend plus only your share of each split');
+eq(flow.owed, 20, 'still coming back from the bill you paid');
+eq(flow.byDay['2026-10-02'], 90, 'calendar shows your shares, not the full bills');
 
-eq(cleanVpa(' Asha.R@OKAXIS '), 'asha.r@okaxis', 'UPI ID normalised');
-eq(cleanVpa('9876543210'), null, 'bare phone is not a UPI ID');
-eq(cleanVpa('a@b'), null, 'too short');
-const link = upiLink({ vpa: 'asha@okaxis', amount: 576, note: 'Settle with Asha from Goa & co' });
-eq(link, 'upi://pay?pa=asha@okaxis&am=576.00&cu=INR&tn=Settle%20with%20Asha%20from%20Goa%20%26%20co', 'UPI link is a plain P2P link');
-eq(readUpiResponse('txnId=AX1&responseCode=00&Status=SUCCESS&txnRef=kk1'), 'success', 'UPI success');
-eq(readUpiResponse('txnId=&Status=FAILURE&responseCode=ZD'), 'failed', 'UPI failure');
-eq(readUpiResponse('Status=SUBMITTED'), 'pending', 'UPI submitted');
-eq(readUpiResponse(''), 'cancelled', 'backed out of UPI app');
-eq(readUpiResponse('NO_APP'), 'no-app', 'no UPI app');
+const month = spendIn([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'upi' }], 'me', '2026-10-01', '2026-10-31');
+eq(month.total, 140, 'home spend is share only');
+eq(month.back, 20, 'home shows what is still to get back');
+const paidForFriends: Expense = { ...cab, id: 'pf', shares: { b: 100 }, amount: 100 };
+const friendsOnly = spendIn([paidForFriends], [], 'me', '2026-10-01', '2026-10-31');
+eq(friendsOnly.total, 0, 'a bill paid fully for friends is not your spend');
+eq(friendsOnly.back, 100, 'all of it is coming back');
+eq(spendIn([{ ...cab, reflect: false }], [], 'me', '2026-10-01', '2026-10-31').back, 0, 'hidden splits stay out of personal');
+
+const mcpData: McpData = {
+  you: { id: 'me', name: 'Me', initials: 'ME' },
+  people: [{ id: 'b', name: 'Bela', initials: 'BE' }],
+  groups: [{ id: 'g', name: 'Airport cab', icon: 'call-split', memberIds: ['b'], note: '', kind: 'split' }],
+  expenses: [lunch, cab, theirs],
+  settlements: [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'cash' }],
+  budget: 1000,
+  now: new Date('2026-10-15T12:00:00'),
+};
+const rpc = (method: string, params?: unknown, id = 1) => handleMcp(JSON.stringify({ jsonrpc: '2.0', id, method, params }), mcpData);
+const asked = (name: string, args: unknown = {}) => JSON.parse(JSON.parse(rpc('tools/call', { name, arguments: args }).body).result.content[0].text);
+eq(JSON.parse(rpc('initialize', { protocolVersion: '2025-03-26' }).body).result.protocolVersion, '2025-03-26', 'mcp echoes a protocol version it knows');
+eq(JSON.parse(rpc('initialize', { protocolVersion: '1999-01-01' }).body).result.protocolVersion, '2025-06-18', 'mcp falls back to its newest version');
+eq(handleMcp(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }), mcpData).status, 202, 'mcp notifications get no body');
+eq(JSON.parse(rpc('tools/list').body).result.tools.length, 5, 'mcp lists its tools');
+eq(JSON.parse(rpc('nope').body).error.code, -32601, 'mcp rejects unknown methods');
+eq(JSON.parse(handleMcp('{bad', mcpData).body).error.code, -32700, 'mcp reports parse errors');
+eq(asked('get_summary').spent, 140, 'mcp spend is your share only');
+eq(asked('get_summary').toGetBack, 20, 'mcp reports what is still to get back');
+eq(asked('get_summary', { month: '2026-09' }).spent, 0, 'mcp reads other months');
+eq(asked('list_transactions', { query: 'dinner' }).count, 3, 'mcp search matches the merchant');
+eq(asked('list_transactions', { query: 'zzz' }).count, 0, 'mcp search filters out the rest');
+eq(asked('list_transactions').transactions.find((t: { id: string }) => t.id === 'cab').yourShare, 50, 'mcp lists your share of each bill');
+eq(asked('list_groups').groups[0].kind, 'quick split', 'mcp names quick splits');
+eq(asked('get_balances').balances[0].net, -20, 'mcp balances read from your side');
+eq(asked('get_balances').balances[0].meaning, 'you owe them', 'mcp balances say who pays whom');
+eq(JSON.parse(rpc('tools/call', { name: 'get_summary', arguments: { month: 'oct' } }).body).result.isError, true, 'mcp bad input is a tool error');
+eq(JSON.stringify(JSON.parse(rpc('tools/call', { name: 'list_transactions' }).body)).includes('4521'), false, 'mcp never includes account numbers');
 
 console.log('selfcheck ok');

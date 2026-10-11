@@ -28,6 +28,7 @@ export function openDb(path: string) {
       name text not null,
       icon text not null,
       note text not null default '',
+      kind text not null default 'group',
       code text not null unique,
       created_by text not null,
       sample integer not null default 0,
@@ -67,7 +68,11 @@ export function openDb(path: string) {
   `);
   const cols = db.prepare('pragma table_info(groups)').all() as { name: string }[];
   if (!cols.some((col) => col.name === 'simplify')) db.exec('alter table groups add column simplify integer not null default 1');
-  const userCols = db.prepare('pragma table_info(users)').all() as { name: string }[];
-  if (!userCols.some((col) => col.name === 'vpa')) db.exec('alter table users add column vpa text');
+  if (!cols.some((col) => col.name === 'kind')) db.exec("alter table groups add column kind text not null default 'group'");
+  // Kakei no longer stores UPI IDs. Drop the columns an older version created so nothing stays behind.
+  for (const table of ['users', 'people']) {
+    const has = (db.prepare(`pragma table_info(${table})`).all() as { name: string }[]).some((col) => col.name === 'vpa');
+    if (has) db.exec(`alter table ${table} drop column vpa`);
+  }
   return db;
 }

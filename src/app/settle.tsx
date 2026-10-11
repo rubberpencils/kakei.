@@ -1,24 +1,16 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Platform, Text, TextInput, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown, useReducedMotion, ZoomIn } from 'react-native-reanimated';
+import { Text, TextInput, View } from 'react-native';
+import Animated, { FadeInDown, useReducedMotion, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ask, Avatar, Back, Button, buzz, Ghost, goBack, Icon, Press, usePalette, Word } from '@/components/ui';
+import { Avatar, Back, Button, buzz, goBack, Icon, Press, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { groupDebts, personName } from '@/lib/ledger';
-import { payWithUpi } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
-import { maskVpa, upiLink, type PayStatus } from '@/lib/upi';
 
-const PAY_ERRORS: Partial<Record<PayStatus, string>> = {
-  failed: 'The payment failed in your UPI app. No money moved, so nothing was recorded.',
-  cancelled: 'No result came back from the UPI app, so nothing was recorded. If money did leave your account, use Mark as paid.',
-  'no-app': 'No UPI app found on this phone. Pay another way, then mark it as paid.',
-  unsupported: 'This version of the app cannot open UPI apps. Update it, or pay another way and mark it as paid.',
-};
-
+// Kakei does not move money. You pay however you like, outside the app, then mark it done here.
 export default function Settle() {
   const { groupId, with: withId } = useLocalSearchParams<{ groupId: string; with?: string }>();
   const c = usePalette();
@@ -31,8 +23,6 @@ export default function Settle() {
   const [pick, setPick] = useState(first ? `${first.fromId}|${first.toId}` : '');
   const chosen = debts.find((d) => `${d.fromId}|${d.toId}` === pick) ?? first;
   const [amt, setAmt] = useState(chosen ? String(Math.round(chosen.amount)) : '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const [done, setDone] = useState<null | { line: string; sub: string }>(null);
 
   if (done) {
@@ -67,48 +57,16 @@ export default function Settle() {
   const otherName = personName(store.people, store.you, other);
   const payee = store.people.find((p) => p.id === other);
   const amount = Number(amt);
-  const canUpi = youPay && !!payee?.vpa && Platform.OS !== 'web';
 
-  const record = (method: 'upi' | 'cash') => {
+  const record = () => {
     if (!amount) return;
-    store.settle({ groupId: group.id, fromId: chosen.fromId, toId: chosen.toId, amount, at: new Date().toISOString(), method });
+    store.settle({ groupId: group.id, fromId: chosen.fromId, toId: chosen.toId, amount, at: new Date().toISOString(), method: 'cash' });
     buzz('done');
     setDone({
       line: `₹${inr(amount)} ${youPay ? `paid to ${otherName}` : `received from ${otherName}`}`,
-      sub: `${group.name}, ${method === 'upi' ? 'paid by UPI' : 'marked as paid'}`,
+      sub: `${group.name}, marked as done`,
     });
   };
-
-  const payUpi = async () => {
-    if (!amount || !payee?.vpa || busy) return;
-    setError('');
-    setBusy(true);
-    const status = await payWithUpi(upiLink({ vpa: payee.vpa, amount, note: `Settle with ${otherName} from ${group.name}` }));
-    setBusy(false);
-    if (status === 'success') return record('upi');
-    if (status === 'pending' || status === 'unknown') {
-      return ask({
-        title: `Did ₹${inr(amount)} reach ${otherName}?`,
-        body: status === 'pending'
-          ? 'Your UPI app says the payment is still processing. Record it once your bank confirms it.'
-          : 'Your UPI app does not report back on this phone. Record it only if the app showed the payment as successful.',
-        confirm: 'Yes, record it',
-        onConfirm: () => record('upi'),
-      });
-    }
-    buzz();
-    setError(PAY_ERRORS[status] ?? 'Something went wrong.');
-  };
-
-  const note = youPay
-    ? payee?.vpa
-      ? Platform.OS === 'web'
-        ? 'UPI apps open from the phone app. Pay there, or pay another way and mark it here.'
-        : null
-      : `${otherName} has not added a UPI ID, so pay them however you like and mark it here.`
-    : store.you.vpa
-      ? `${otherName} can pay you by UPI from their phone. Mark it here if they paid another way.`
-      : 'Add your UPI ID in Profile so friends can pay you in one tap.';
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top + 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 16 }}>
@@ -130,7 +88,7 @@ export default function Settle() {
             const on = key === `${chosen.fromId}|${chosen.toId}`;
             const label = d.fromId === store.you.id ? `To ${personName(store.people, store.you, d.toId)}` : `From ${personName(store.people, store.you, d.fromId)}`;
             return (
-              <Press key={key} onPress={() => { buzz(); setPick(key); setAmt(String(Math.round(d.amount))); setError(''); }} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
+              <Press key={key} onPress={() => { buzz(); setPick(key); setAmt(String(Math.round(d.amount))); }} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
                 <Text style={{ fontFamily: font.medium, color: on ? c.accFg : c.fg, fontSize: 13 }}>{label} ₹{inr(d.amount)}</Text>
               </Press>
             );
@@ -140,7 +98,7 @@ export default function Settle() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 28 }}>
         <Text style={{ fontFamily: font.display, fontSize: 30, color: c.mut }}>₹</Text>
-        <TextInput value={amt} onChangeText={(v) => { setAmt(v.replace(/[^0-9.]/g, '')); setError(''); }} keyboardType="decimal-pad" style={{ fontFamily: font.display, fontSize: 56, color: c.fg, minWidth: 80, textAlign: 'center' }} />
+        <TextInput value={amt} onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))} keyboardType="decimal-pad" style={{ fontFamily: font.display, fontSize: 56, color: c.fg, minWidth: 80, textAlign: 'center' }} />
       </View>
       {amount > 0 && amount < chosen.amount - 0.5 ? (
         <Text style={{ fontFamily: font.body, color: c.mut, textAlign: 'center' }}>Partial. ₹{inr(chosen.amount - amount)} stays open.</Text>
@@ -148,24 +106,10 @@ export default function Settle() {
 
       <View style={{ flex: 1 }} />
 
-      {error ? (
-        <Animated.View entering={reduce ? undefined : FadeIn.duration(160)} style={{ flexDirection: 'row', gap: 10, padding: 14, borderRadius: 16, backgroundColor: c.sub, marginBottom: 16 }}>
-          <Icon name="alert-circle-outline" size={18} color={c.neg} />
-          <Text style={{ flex: 1, fontFamily: font.body, fontSize: 13.5, lineHeight: 19, color: c.fg }}>{error}</Text>
-        </Animated.View>
-      ) : note ? (
-        <Text style={{ fontFamily: font.body, fontSize: 13, lineHeight: 19, color: c.mut, textAlign: 'center', marginBottom: 16 }}>{note}</Text>
-      ) : null}
-
-      {canUpi ? (
-        <>
-          <Button label={busy ? 'Waiting for UPI app' : `Pay ₹${inr(amount || 0)} with UPI`} icon="arrow-top-right" onPress={payUpi} disabled={!(amount > 0) || busy} />
-          <Text onLongPress={() => router.push({ pathname: '/upi-lab', params: { to: other, am: String(amount) } })} style={{ fontFamily: font.body, fontSize: 12, color: c.mut, textAlign: 'center', marginTop: 8 }}>To {maskVpa(payee!.vpa!)}</Text>
-          <Ghost label="I paid another way" onPress={() => record('cash')} />
-        </>
-      ) : (
-        <Button label={youPay ? 'Mark as paid' : 'Mark as received'} onPress={() => record('cash')} disabled={!(amount > 0)} />
-      )}
+      <Text style={{ fontFamily: font.body, fontSize: 13, lineHeight: 19, color: c.mut, textAlign: 'center', marginBottom: 16 }}>
+        {youPay ? `Pay ${otherName} however you like, then mark it here.` : `Mark it once ${otherName} has paid you.`}
+      </Text>
+      <Button label={youPay ? 'Mark as paid' : 'Mark as received'} onPress={record} disabled={!(amount > 0)} />
     </View>
   );
 }

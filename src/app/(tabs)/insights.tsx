@@ -60,10 +60,10 @@ export default function Insights() {
   const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
   const nowFrom = unit === 'day' ? today : unit === 'week' ? dayKey(weekStart.toISOString()) : monthBounds(now.getFullYear(), now.getMonth() + 1).from;
   const soFar = cashFlow(store.expenses, store.settlements, you, nowFrom, today);
-  const current = soFar.out - soFar.recurring;
+  const current = soFar.spent - soFar.recurring;
   // Everyday pace leaves recurring bills out: one rent day would otherwise put every average over.
   const everyday = Math.max(0, budget - flow.recurring) / periodDays;
-  const average = ((flow.out - flow.recurring) / elapsed) * PER[unit];
+  const average = ((flow.spent - flow.recurring) / elapsed) * PER[unit];
   const allowance = everyday * PER[unit];
   const daysOver = Object.values(flow.byDay).filter((v) => v > everyday).length;
 
@@ -78,7 +78,7 @@ export default function Insights() {
     const b = monthBounds(y, m);
     const moved = cashFlow(store.expenses, store.settlements, you, b.from, b.to);
     const snap = store.history.find((h) => h.y === y && h.m === m);
-    const spent = moved.count ? moved.net : snap?.spent ?? moved.net;
+    const spent = moved.count ? moved.spent : snap?.spent ?? moved.spent;
     months.push({ y, m, spent, save: Math.max(0, store.budget - spent) });
   }
   const maxBar = Math.max(...months.map((x) => x.spent), store.budget, 1);
@@ -87,14 +87,14 @@ export default function Insights() {
   const dayItems = day ? flow.items.filter((x) => dayKey(x.at) === day) : [];
   const name = (pid: string) => personName(store.people, store.you, pid);
 
-  const over = budget > 0 && flow.net > budget;
-  const scale = Math.max(budget, flow.net, 1);
-  const unspent = Math.max(0, budget - flow.net);
+  const over = budget > 0 && flow.spent > budget;
+  const scale = Math.max(budget, flow.spent + flow.owed, 1);
+  const unspent = Math.max(0, budget - flow.spent);
   const goal = budget * SAVE_GOAL;
-  const room = budget - goal - flow.net;
+  const room = budget - goal - flow.spent;
   const daysLeft = periodDays - elapsed + 1;
   const safe = live && room > 0 ? room / daysLeft : 0;
-  const oneTime = Math.max(0, flow.out - flow.recurring);
+  const oneTime = Math.max(0, flow.spent - flow.recurring);
 
   const shift = (dir: number) => {
     setDay(null);
@@ -140,21 +140,21 @@ export default function Insights() {
 
       <Card style={{ marginTop: 10 }}>
         <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.mut }}>Spent</Text>
-        <Text style={{ fontFamily: font.display, fontSize: 40, letterSpacing: -1.2, color: c.fg, marginTop: 2 }}>₹{inr(flow.net)}</Text>
+        <Text style={{ fontFamily: font.display, fontSize: 40, letterSpacing: -1.2, color: c.fg, marginTop: 2 }}>₹{inr(flow.spent)}</Text>
         <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 2 }}>
-          {budget ? (over ? `₹${inr(flow.net - budget)} over the ₹${inr(budget)} budget` : `${Math.round((unspent / budget) * 100)}% of ₹${inr(budget)} left`) : 'Set a monthly budget in Profile to track it here'}
+          {budget ? (over ? `₹${inr(flow.spent - budget)} over the ₹${inr(budget)} budget` : `${Math.round((unspent / budget) * 100)}% of ₹${inr(budget)} left`) : 'Set a monthly budget in Profile to track it here'}
         </Text>
         <View style={{ marginTop: 16 }}>
-          <Meter parts={[{ pct: (flow.real / scale) * 100, color: over ? c.neg : c.fg }, { pct: (flow.owed / scale) * 100, color: c.pos }]} mark={over ? (budget / scale) * 100 : undefined} />
+          <Meter parts={[{ pct: (flow.spent / scale) * 100, color: over ? c.neg : c.fg }, { pct: (flow.owed / scale) * 100, color: c.pos }]} mark={over ? (budget / scale) * 100 : undefined} />
         </View>
         <View style={{ marginTop: 14, gap: 8 }}>
-          <Key color={over ? c.neg : c.fg} label="Your real spend" value={flow.real} />
-          <Key color={c.pos} label="Coming back to you" value={flow.owed} />
-          {budget ? <Key ring color={c.mut} label={over ? 'Over budget' : 'Left in budget'} value={over ? flow.net - budget : unspent} /> : null}
+          <Key color={over ? c.neg : c.fg} label="Your share" value={flow.spent} />
+          <Key color={c.pos} label="Still coming back to you" value={flow.owed} />
+          {budget ? <Key ring color={c.mut} label={over ? 'Over budget' : 'Left in budget'} value={over ? flow.spent - budget : unspent} /> : null}
         </View>
-        {flow.back ? (
+        {flow.owed ? (
           <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 12, lineHeight: 17 }}>
-            ₹{inr(flow.out)} went out, ₹{inr(flow.back)} was paid back by friends.
+            Only your share counts as spend. The green part is money you paid for others and have not got back yet.
           </Text>
         ) : null}
       </Card>
@@ -218,7 +218,7 @@ export default function Insights() {
         <Tile label="Expenses" value={String(flow.count)} sub={`${days.length} ${days.length === 1 ? 'day' : 'days'} with spending`} />
         {everyday
           ? <Tile label="Days on budget" value={`${Math.max(0, elapsed - daysOver)} of ${elapsed}`} sub={`under ₹${inr(everyday)} a day`} />
-          : <Tile label="Daily average" value={`₹${inr(flow.out / elapsed)}`} sub={`over ${elapsed} ${elapsed === 1 ? 'day' : 'days'}`} />}
+          : <Tile label="Daily average" value={`₹${inr(flow.spent / elapsed)}`} sub={`over ${elapsed} ${elapsed === 1 ? 'day' : 'days'}`} />}
       </View>
 
       <Section title="Categories" top={28} />
@@ -251,10 +251,10 @@ export default function Insights() {
                   : over ? 'Over budget, so nothing is left to save.' : `₹${inr(-room)} of the 20% savings is already spent.`}
             </Text>
             <View style={{ marginTop: 16 }}>
-              <Meter zone={100 - SAVE_GOAL * 100} mark={100 - SAVE_GOAL * 100} parts={[{ pct: (flow.net / budget) * 100, color: room < 0 ? c.neg : c.fg }]} />
+              <Meter zone={100 - SAVE_GOAL * 100} mark={100 - SAVE_GOAL * 100} parts={[{ pct: (flow.spent / budget) * 100, color: room < 0 ? c.neg : c.fg }]} />
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-              <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>Spent ₹{inr(flow.net)}</Text>
+              <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>Spent ₹{inr(flow.spent)}</Text>
               <Text style={{ fontFamily: font.body, fontSize: 12, color: c.pos }}>Save 20%, ₹{inr(goal)}</Text>
             </View>
           </>
@@ -277,9 +277,9 @@ export default function Insights() {
 
       <Section title="Recurring and one-time" top={28} />
       <Card style={{ gap: 12 }}>
-        <Meter parts={[{ pct: flow.out ? (flow.recurring / flow.out) * 100 : 0, color: c.fg }, { pct: flow.out ? (oneTime / flow.out) * 100 : 0, color: c.mut }]} />
-        <Key color={c.fg} label="Recurring" value={flow.recurring} pct={flow.out ? flow.recurring / flow.out : 0} />
-        <Key color={c.mut} label="One-time" value={oneTime} pct={flow.out ? oneTime / flow.out : 0} />
+        <Meter parts={[{ pct: flow.spent ? (flow.recurring / flow.spent) * 100 : 0, color: c.fg }, { pct: flow.spent ? (oneTime / flow.spent) * 100 : 0, color: c.mut }]} />
+        <Key color={c.fg} label="Recurring" value={flow.recurring} pct={flow.spent ? flow.recurring / flow.spent : 0} />
+        <Key color={c.mut} label="One-time" value={oneTime} pct={flow.spent ? oneTime / flow.spent : 0} />
       </Card>
 
       <Section title="Top merchants" top={28} />

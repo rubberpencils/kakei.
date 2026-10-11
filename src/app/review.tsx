@@ -18,7 +18,8 @@ export default function Review() {
   const cur = store.queue[0];
   const [tag, setTag] = useState<string | null>(cur?.tag ?? null);
   const [groupOn, setGroupOn] = useState(false);
-  const [groupId, setGroupId] = useState(store.groups[0]?.id ?? '');
+  const [groupId, setGroupId] = useState('quick');
+  const groups = store.groups.filter((g) => g.kind !== 'split');
   const [reflect, setReflect] = useState(true);
   const [paste, setPaste] = useState('');
   const [seenId, setSeenId] = useState(cur?.id);
@@ -32,9 +33,12 @@ export default function Review() {
   const confirm = () => {
     if (!cur) return;
     const chosen = tag;
-    const gid = groupId || store.groups[0]?.id;
-    if (groupOn && gid) {
-      router.push({ pathname: '/split', params: { groupId: gid, draftId: cur.id, reflect: reflect ? '1' : '0', tag: chosen ?? '' } });
+    if (groupOn && groupId === 'quick') {
+      router.push({ pathname: '/quick-split', params: { draftId: cur.id, tag: chosen ?? '' } });
+      return;
+    }
+    if (groupOn && groups.some((g) => g.id === groupId)) {
+      router.push({ pathname: '/split', params: { groupId, draftId: cur.id, reflect: reflect ? '1' : '0', tag: chosen ?? '' } });
       return;
     }
     buzz('done');
@@ -91,16 +95,16 @@ export default function Review() {
             <View style={{ marginTop: 20, padding: 16, borderRadius: 16, backgroundColor: c.sub }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                 <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ fontFamily: font.medium, fontSize: 14.5, color: c.fg }}>Add to a group split</Text>
-                  <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>Your share can show up in personal.</Text>
+                  <Text style={{ fontFamily: font.medium, fontSize: 14.5, color: c.fg }}>Split this</Text>
+                  <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>Only your share counts as spend. The rest shows as coming back.</Text>
                 </View>
-                <Toggle on={groupOn} onPress={() => (store.groups.length ? setGroupOn((v) => !v) : router.push('/new-group'))} />
+                <Toggle on={groupOn} onPress={() => setGroupOn((v) => !v)} />
               </View>
               {groupOn ? (
                 <View style={{ marginTop: 12 }}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {store.groups.map((g) => {
-                      const on = g.id === (groupId || store.groups[0]?.id);
+                    {[{ id: 'quick', name: 'Quick split' }, ...groups].map((g) => {
+                      const on = g.id === groupId;
                       return (
                         <Press key={g.id} onPress={() => setGroupId(g.id)} style={{ height: 32, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: on ? c.acc : c.line, backgroundColor: on ? c.acc : 'transparent', justifyContent: 'center' }}>
                           <Text style={{ fontFamily: font.medium, fontSize: 13, color: on ? c.accFg : c.fg }}>{g.name}</Text>
@@ -108,12 +112,16 @@ export default function Review() {
                       );
                     })}
                   </View>
-                  <Press onPress={() => setReflect((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 }}>
-                    <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 1, borderColor: reflect ? c.acc : c.line, backgroundColor: reflect ? c.acc : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                      {reflect ? <Icon name="check" size={14} color={c.accFg} /> : null}
-                    </View>
-                    <Text style={{ fontFamily: font.body, fontSize: 14, color: c.fg }}>Reflect my share in personal expenses</Text>
-                  </Press>
+                  {groupId === 'quick' ? (
+                    <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 12, lineHeight: 18 }}>Pick who shared it on the next screen. It becomes a small split, not a group.</Text>
+                  ) : (
+                    <Press onPress={() => setReflect((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                      <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 1, borderColor: reflect ? c.acc : c.line, backgroundColor: reflect ? c.acc : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                        {reflect ? <Icon name="check" size={14} color={c.accFg} /> : null}
+                      </View>
+                      <Text style={{ fontFamily: font.body, fontSize: 14, color: c.fg }}>Reflect my share in personal expenses</Text>
+                    </Press>
+                  )}
                 </View>
               ) : null}
             </View>

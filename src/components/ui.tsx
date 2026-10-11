@@ -104,9 +104,9 @@ export function Section({ title, action, onAction, top = 32 }: { title: string; 
   );
 }
 
-export function Wordmark({ size = 22 }: { size?: number }) {
+export function Wordmark({ size = 28 }: { size?: number }) {
   const c = usePalette();
-  return <Text style={{ fontFamily: font.display, fontSize: size, letterSpacing: -size * 0.06, color: c.brand }}>kakie.</Text>;
+  return <Text style={{ fontFamily: font.display, fontSize: size, letterSpacing: -0.8, lineHeight: size + 4, color: c.brand }}>Kakei.</Text>;
 }
 
 export function avatarHue(id: string) {
@@ -290,7 +290,7 @@ export function SettleRow({ s, you, name, onPress }: { s: Settlement; you: strin
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: font.body, fontSize: 13.5, color: c.mut }} numberOfLines={1}>{who}</Text>
-        <Text style={{ fontFamily: font.body, fontSize: 11.5, color: c.mut, opacity: 0.75, marginTop: 1 }}>Settled by {s.method === 'upi' ? 'UPI' : 'cash'}</Text>
+        <Text style={{ fontFamily: font.body, fontSize: 11.5, color: c.mut, opacity: 0.75, marginTop: 1 }}>{s.method === 'upi' ? 'Paid by UPI' : 'Marked as done'}</Text>
       </View>
       <Text style={{ fontFamily: font.medium, fontSize: 13.5, color: mine ? c.pos : c.mut }}>₹{inr(s.amount)}</Text>
     </Press>
@@ -357,7 +357,7 @@ export function TxnRow({ item, onRemove, showDay = true, full }: { item: Expense
   const you = store.you.id;
   const owed = owedBack(item, you, rem);
   const owe = youStillOwe(item, you, rem);
-  const shown = item.groupId && !full ? pocket(item, you, rem) : item.amount;
+  const shown = item.groupId && !full ? pocket(item, you) : item.amount;
   const col = item.tag ? tagColors(item.tag, isDark) : null;
   const group = item.groupId ? store.groups.find((g) => g.id === item.groupId) : null;
   const row = (
@@ -372,6 +372,7 @@ export function TxnRow({ item, onRemove, showDay = true, full }: { item: Expense
           {item.transfer ? ' · card bill' : ''}
           {item.recurring ? ` · ${item.recurring}` : ''}
           {group ? ` · ${group.name}` : ''}
+          {group && !full && !item.income && shown !== item.amount ? ` · bill ₹${inr(item.amount)}` : ''}
         </Text>
         {owed > 0 ? <Text style={{ fontFamily: font.medium, fontSize: 12, color: c.pos, marginTop: 2 }}>Owed back ₹{inr(owed)}</Text> : null}
         {owe > 0 ? <Text style={{ fontFamily: font.medium, fontSize: 12, color: c.neg, marginTop: 2 }}>You owe ₹{inr(owe)}</Text> : null}

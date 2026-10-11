@@ -15,6 +15,7 @@ import { useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReducedMotion } from 'react-native-reanimated';
 
+import { McpHost } from '@/components/mcp-host';
 import { Splash } from '@/components/splash';
 import { ConfirmHost, Toast } from '@/components/ui';
 import { StoreProvider, useStore } from '@/lib/store';
@@ -46,8 +47,9 @@ function Shell() {
             <Stack.Screen name="add" options={{ presentation: 'modal', animation: reduce ? 'fade' : 'slide_from_bottom' }} />
             <Stack.Screen name="review" />
             <Stack.Screen name="split" />
+            <Stack.Screen name="quick-split" />
             <Stack.Screen name="settle" />
-            <Stack.Screen name="upi-lab" />
+            <Stack.Screen name="developer" />
             <Stack.Screen name="join" />
             <Stack.Screen name="new-group" />
             <Stack.Screen name="group/[id]" />
@@ -62,6 +64,7 @@ function Shell() {
           </Stack.Protected>
         </Stack>
       ) : null}
+      <McpHost />
       <Toast />
       <ConfirmHost />
       {splash ? <Splash ready={ready} onDone={done} /> : null}

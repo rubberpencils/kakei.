@@ -9,9 +9,11 @@ import { parseSms } from './parser';
 import { sampleData, TAGS } from './seed';
 import { readDeviceSms } from './sms';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
-import { cleanVpa } from './upi';
 
 const KEY = 'kakie.v2';
+
+// Developer options. They live only on this phone and are never synced.
+export type DevSettings = { mcp: boolean; lan: boolean; port: number; token: string };
 
 type Local = {
   base: string;
@@ -28,6 +30,7 @@ type Local = {
   queue: Draft[];
   seen: string[];
   smsOn: boolean;
+  dev: DevSettings;
   outbox: Queued[];
   syncedAt: number | null;
 };
@@ -49,6 +52,7 @@ const FRESH: Local = {
   queue: [],
   seen: [],
   smsOn: false,
+  dev: { mcp: false, lan: false, port: 8765, token: '' },
   outbox: [],
   syncedAt: null,
 };
@@ -57,15 +61,7 @@ type SmsIn = { sender: string; body: string; date: number };
 type NewExpense = Omit<Expense, 'id' | 'sample'> & { sample?: boolean };
 export type SyncState = 'idle' | 'syncing' | 'offline';
 
-const person = (id: string, name: string, claimed?: boolean, vpa?: string | null): Person => ({ id, name, initials: initials(name), claimed, vpa });
-
-// UPI IDs stay in memory only; the persisted cache is plain AsyncStorage.
-const withoutVpa = (s: Local): Local => ({
-  ...s,
-  you: { ...s.you, vpa: undefined },
-  people: s.people.map((p) => ({ ...p, vpa: undefined })),
-  outbox: s.outbox.map((o) => (o.type === 'me.set' && o.vpa ? { ...o, vpa: undefined } : o)),
-});
+const person = (id: string, name: string, claimed?: boolean): Person => ({ id, name, initials: initials(name), claimed });
 
 function applyOp(s: Local, op: Op): Local {
   switch (op.type) {
@@ -119,7 +115,7 @@ function applyOp(s: Local, op: Op): Local {
         history: op.prefs.history ?? s.history,
       };
     case 'me.set':
-      return { ...s, you: person(s.you.id, op.name ?? s.you.name, s.you.claimed, op.vpa === undefined ? s.you.vpa : op.vpa) };
+      return { ...s, you: person(s.you.id, op.name ?? s.you.name, s.you.claimed) };
   }
 }
 
@@ -132,9 +128,9 @@ function enqueue(s: Local, ops: Op[]): Local {
 function rebase(s: Local, r: Remote): Local {
   let next: Local = {
     ...s,
-    you: person(r.you.id, r.you.name, undefined, r.you.vpa ?? null),
+    you: person(r.you.id, r.you.name),
     phone: r.you.phone,
-    people: r.people.map((p) => person(p.id, p.name, p.claimed, p.vpa ?? null)),
+    people: r.people.map((p) => person(p.id, p.name, p.claimed)),
     groups: r.groups,
     expenses: r.expenses,
     settlements: r.settlements,
@@ -188,13 +184,13 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   hasSample: boolean;
   flash: (m: string) => void;
   setBase: (raw: string) => Promise<string | null>;
-  signUp: (name: string, phone: string, password: string, vpa?: string) => Promise<string | null>;
+  signUp: (name: string, phone: string, password: string) => Promise<string | null>;
   signIn: (phone: string, password: string) => Promise<string | null>;
   signOut: () => void;
   syncNow: () => Promise<void>;
   setSmsOn: (on: boolean) => void;
   setName: (name: string) => void;
-  setVpa: (raw: string) => string | null;
+  setDev: (patch: Partial<DevSettings>) => void;
   setBudget: (n: number) => void;
   addTag: (raw: string) => string | null;
   addExpense: (e: NewExpense) => string;
@@ -207,6 +203,17 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   settle: (s: Omit<Settlement, 'id' | 'sample'>) => void;
   createGroup: (name: string, memberNames: string[], icon?: string) => string;
   updateGroup: (id: string, patch: Partial<Pick<Group, 'name' | 'icon' | 'note' | 'simplify'>>) => void;
+  quickSplit: (o: {
+    expenseId?: string;
+    draftId?: string;
+    amount?: number;
+    name: string;
+    people: { id: string; name: string }[];
+    payerId: string;
+    shares: Record<string, number>;
+    tag?: string | null;
+  }) => string;
+  unsplit: (groupId: string) => void;
   addMember: (groupId: string, name: string) => void;
   deleteGroup: (id: string) => void;
   previewInvite: (code: string) => Promise<Invite | string>;
@@ -243,7 +250,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (ready) AsyncStorage.setItem(KEY, JSON.stringify(withoutVpa(s))).catch(() => {});
+    if (ready) AsyncStorage.setItem(KEY, JSON.stringify(s)).catch(() => {});
   }, [s, ready]);
 
   const api = useMemo<Store>(() => {
@@ -337,7 +344,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cur.current = { ...cur.current, base };
         return null;
       },
-      signUp: (name, phone, password, vpa) => authed('/auth/signup', { name, phone, password, ...(vpa ? { vpa } : {}) }),
+      signUp: (name, phone, password) => authed('/auth/signup', { name, phone, password }),
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
       signOut: () => {
         const { base, token } = cur.current;
@@ -349,13 +356,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const n = name.trim();
         if (n && n !== cur.current.you.name) commit([{ type: 'me.set', name: n }]);
       },
-      setVpa: (raw) => {
-        const vpa = raw.trim() ? cleanVpa(raw) : null;
-        if (raw.trim() && !vpa) return 'Enter a UPI ID like name@bank';
-        commit([{ type: 'me.set', vpa }]);
-        flash(vpa ? 'UPI ID saved' : 'UPI ID removed');
-        return null;
-      },
+      setDev: (patch) => setS((x) => ({ ...x, dev: { ...x.dev, ...patch } })),
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
       addTag: (raw) => {
         const tag = slugTag(raw);
@@ -417,7 +418,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       createGroup: (name, memberNames, icon = 'account-group') => {
         const id = uid();
-        const ops: Op[] = [{ type: 'group.upsert', group: { id, name: name.trim() || 'Group', icon, note: '' } }];
+        const ops: Op[] = [{ type: 'group.upsert', group: { id, name: name.trim() || 'Group', icon, note: '', kind: 'group' } }];
         for (const raw of memberNames) {
           const n = raw.trim();
           if (n) ops.push({ type: 'person.add', groupId: id, person: { id: uid(), name: n } });
@@ -429,7 +430,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const g = cur.current.groups.find((x) => x.id === id);
         if (!g) return;
         const next = { ...g, ...patch };
-        commit([{ type: 'group.upsert', group: { id, name: next.name.trim() || g.name, icon: next.icon, note: next.note, simplify: next.simplify !== false } }]);
+        commit([{ type: 'group.upsert', group: { id, name: next.name.trim() || g.name, icon: next.icon, note: next.note, simplify: next.simplify !== false, kind: g.kind ?? 'group' } }]);
+      },
+      quickSplit: (o) => {
+        const x = cur.current;
+        let base: Expense | undefined;
+        let dropDraft: string | null = null;
+        if (o.expenseId) base = x.expenses.find((e) => e.id === o.expenseId);
+        else if (o.draftId) {
+          const d = x.queue.find((q) => q.id === o.draftId);
+          if (d) {
+            base = {
+              id: uid(), merchant: d.merchant, amount: d.amount, at: d.at, tag: o.tag ?? null, rail: d.rail,
+              income: d.income, transfer: d.transfer, recurring: null, recurId: null, groupId: null, payerId: null,
+              shares: null, reflect: true, bank: d.bank, account: d.account, sample: d.sample,
+            };
+            dropDraft = d.id;
+          }
+        }
+        if (!o.expenseId && !o.draftId && o.amount && o.amount > 0) {
+          base = {
+            id: uid(), merchant: o.name.trim() || 'Split', amount: o.amount, at: new Date().toISOString(), tag: o.tag ?? null, rail: 'upi',
+            income: false, transfer: false, recurring: null, recurId: null, groupId: null, payerId: null, shares: null, reflect: true,
+          };
+        }
+        if (!base) return '';
+        const groupId = uid();
+        const ops: Op[] = [{ type: 'group.upsert', group: { id: groupId, name: o.name.trim() || base.merchant, icon: 'call-split', note: '', kind: 'split' } }];
+        for (const p of o.people) if (p.id !== x.you.id) ops.push({ type: 'person.add', groupId, person: { id: p.id, name: p.name } });
+        ops.push({ type: 'expense.upsert', expense: { ...base, groupId, payerId: o.payerId, shares: o.shares, reflect: true } });
+        const tag = o.tag ?? base.tag;
+        if (tag && !x.tags.includes(tag)) ops.push({ type: 'prefs.set', prefs: { tags: [...x.tags, tag] } });
+        setS((y) => ({ ...enqueue(y, ops), queue: dropDraft ? y.queue.filter((q) => q.id !== dropDraft) : y.queue }));
+        return groupId;
+      },
+      unsplit: (groupId) => {
+        const x = cur.current;
+        // Bills you paid go back to being plain expenses. Bills a friend paid belong to the split and go with it.
+        const ops: Op[] = x.expenses
+          .filter((e) => e.groupId === groupId && e.payerId === x.you.id)
+          .map((e) => ({ type: 'expense.upsert', expense: { ...e, groupId: null, payerId: null, shares: null, reflect: true } }) as Op);
+        ops.push({ type: 'group.delete', id: groupId });
+        commit(ops);
       },
       addMember: (groupId, name) => {
         const n = name.trim();
@@ -472,7 +514,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const data = sampleData(x.you.id);
         const ops: Op[] = [];
         for (const g of data.groups) {
-          ops.push({ type: 'group.upsert', group: { id: g.id, name: g.name, icon: g.icon, note: g.note, sample: true } });
+          ops.push({ type: 'group.upsert', group: { id: g.id, name: g.name, icon: g.icon, note: g.note, sample: true, kind: g.kind ?? 'group' } });
           for (const pid of g.memberIds) {
             const p = data.people.find((q) => q.id === pid)!;
             ops.push({ type: 'person.add', groupId: g.id, person: { id: p.id, name: p.name } });

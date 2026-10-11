@@ -32,7 +32,7 @@ export default function ExpenseScreen() {
   const name = (pid: string) => personName(store.people, store.you, pid);
   const owed = owedBack(e, you, rem);
   const owe = youStillOwe(e, you, rem);
-  const mine = group ? pocket(e, you, rem) : e.amount;
+  const mine = group ? pocket(e, you) : e.amount;
 
   const remove = () => {
     const go = () => {
@@ -52,7 +52,7 @@ export default function ExpenseScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 32 }}>
       <Back />
-      <Text style={{ fontFamily: font.body, color: c.mut, fontSize: 13 }}>{prettyDay(e.at)}{group ? ` · ${group.name}` : ''}</Text>
+      <Text style={{ fontFamily: font.body, color: c.mut, fontSize: 13 }}>{prettyDay(e.at)}{group ? ` · ${group.kind === 'split' ? 'Split' : group.name}` : ''}</Text>
       <Word size={28} style={{ marginTop: 4 }}>{e.merchant}</Word>
       <Text style={{ fontFamily: font.display, fontSize: 48, letterSpacing: -1.5, color: e.income ? c.pos : c.fg, marginTop: 10 }}>
         {e.income ? '+' : '−'}₹{inr(e.amount)}
@@ -93,6 +93,36 @@ export default function ExpenseScreen() {
             <Toggle on={e.reflect} onPress={() => store.updateExpense({ ...e, reflect: !e.reflect })} />
           </View>
         </>
+      ) : null}
+
+      {!group && !e.income && !e.transfer ? (
+        <Press onPress={() => router.push({ pathname: '/quick-split', params: { expenseId: e.id } })} style={{ marginTop: 26, padding: 16, borderRadius: 16, backgroundColor: c.sub, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <Icon name="call-split" size={22} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>Split this</Text>
+            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>Paid for friends too? Only your share counts as spend.</Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={c.mut} />
+        </Press>
+      ) : null}
+      {group?.kind === 'split' && (owed > 0 || owe > 0) ? (
+        <Press onPress={() => router.push({ pathname: '/settle', params: { groupId: group.id } })} style={{ marginTop: 18, alignSelf: 'flex-start', height: 42, paddingHorizontal: 18, borderRadius: 21, backgroundColor: c.acc, justifyContent: 'center' }}>
+          <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 14 }}>{owe > 0 ? 'Mark as paid' : 'Mark as received'}</Text>
+        </Press>
+      ) : null}
+      {group?.kind === 'split' && group.owner ? (
+        <Press
+          onPress={() => ask({
+            title: 'Undo this split?',
+            body: 'The bill goes back to being a plain expense for the full amount. Balances with these friends clear.',
+            confirm: 'Undo split',
+            destructive: true,
+            onConfirm: () => { store.unsplit(group.id); store.flash('Split undone'); goBack(); },
+          })}
+          style={{ marginTop: 22 }}
+        >
+          <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 14 }}>Undo split</Text>
+        </Press>
       ) : null}
 
       {!group && !e.income ? (

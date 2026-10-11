@@ -9,7 +9,6 @@
     "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.ts",
     "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/index.ts",
     "check": "node --disable-warning=ExperimentalWarning src/check.ts",
-    "upi-test": "node src/upi-test.ts",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {

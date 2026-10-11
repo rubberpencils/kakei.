@@ -39,7 +39,7 @@ export default function Personal() {
     const d = days[days.length - 1];
     d.items.push(e);
     if (e.income) d.in += e.amount;
-    else d.out += pocket(e, store.you.id, rem);
+    else d.out += pocket(e, store.you.id);
   }
 
   // Day headers are direct ScrollView children so they can stick; index 0 is the title block.

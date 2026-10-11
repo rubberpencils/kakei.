@@ -22,6 +22,8 @@ export default function Home() {
   const month = spendIn(store.expenses, store.settlements, store.you.id, bounds.from, bounds.to);
   const left = Math.max(0, store.budget - month.total);
   const pct = Math.min(100, store.budget ? (month.total / store.budget) * 100 : 0);
+  // Money you paid for others and have not got back yet. It sits after your share, in green, and is not spend.
+  const backPct = store.budget ? Math.min(100 - pct, (month.back / store.budget) * 100) : 0;
   const day = now.getDate();
   const days = new Date(y, m, 0).getDate();
   const pace = day >= 5 ? Math.round((month.total / day) * days) : null;
@@ -67,9 +69,9 @@ export default function Home() {
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Svg style={{ position: 'absolute', top: 0 }} width={width} height={280}>
         <Defs>
-          <RadialGradient id="glow" cx="50%" cy="0%" r="75%">
-            <Stop offset="0" stopColor={c.fg} stopOpacity={0.08} />
-            <Stop offset="1" stopColor={c.fg} stopOpacity={0} />
+          <RadialGradient id="glow" cx="18%" cy="0%" r="80%">
+            <Stop offset="0" stopColor={c.brand} stopOpacity={0.16} />
+            <Stop offset="1" stopColor={c.brand} stopOpacity={0} />
           </RadialGradient>
         </Defs>
         <Rect width={width} height={280} fill="url(#glow)" />
@@ -102,11 +104,18 @@ export default function Home() {
             <Text style={{ fontFamily: font.display, fontSize: 58, letterSpacing: -2, color: c.fg, lineHeight: 64 }}>{inr(month.total)}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 }}>
-            <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: c.bar }}>
-              <View style={{ width: `${pct}%`, height: 4, borderRadius: 2, backgroundColor: c.acc }} />
+            <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: c.bar, flexDirection: 'row', overflow: 'hidden' }}>
+              <View style={{ width: `${pct}%`, height: 4, backgroundColor: c.acc }} />
+              {backPct > 0 ? <View style={{ width: `${backPct}%`, height: 4, backgroundColor: c.pos }} /> : null}
             </View>
             {store.budget ? <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut }}>₹{inr(left)} left</Text> : null}
           </View>
+          {month.back > 0.5 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.pos }} />
+              <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: c.pos }}>₹{inr(month.back)} still to get back from friends</Text>
+            </View>
+          ) : null}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
             <Icon name={onTrack ? 'trending-down' : 'trending-up'} size={16} color={onTrack ? c.pos : c.neg} />
             <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: !store.budget ? c.mut : onTrack ? c.pos : c.neg }}>{budgetLine}</Text>
@@ -174,7 +183,7 @@ export default function Home() {
         </View>
         <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, gap: 12 }}>
-            {store.groups.map((g) => {
+            {store.groups.filter((g) => g.kind !== 'split').map((g) => {
               const n = youNet(groupDebts(store.expenses, store.settlements, g), store.you.id);
               const color = n.net > 0 ? c.pos : n.net < 0 ? c.neg : c.mut;
               return (

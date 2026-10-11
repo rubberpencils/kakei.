@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 
 import { createApp } from './app.ts';
@@ -9,7 +8,7 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 }
 
 const db = openDb(':memory:');
-const server = createApp(db, { cors: '*', key: randomBytes(32) });
+const server = createApp(db, { cors: '*' });
 await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -103,18 +102,19 @@ try {
   await call('POST', '/ops', A, { ops: [{ type: 'group.upsert', group: { id: 'goa01', name: 'Goa', icon: 'beach', note: '', simplify: false } }] });
   eq((await call('GET', '/sync', B)).json.groups.find((g: any) => g.id === 'goa01').simplify, false, 'simplify off syncs to members');
 
-  eq((await call('POST', '/ops', B, { ops: [{ type: 'me.set', vpa: 'not a upi id' }] })).json.results[0].ok, false, 'bad UPI ID rejected');
-  await call('POST', '/ops', B, { ops: [{ type: 'me.set', vpa: ' Aarav.K@OKAXIS ' }] });
-  eq((await call('GET', '/sync', B)).json.you.vpa, 'aarav.k@okaxis', 'own UPI ID normalised');
-  eq((await call('GET', '/sync', A)).json.people.find((p: any) => p.id === bid).vpa, 'aarav.k@okaxis', 'co-member sees UPI ID');
-  eq((await call('GET', '/sync', A)).json.people.find((p: any) => p.id === 'aonly1').vpa, null, 'placeholder has no UPI ID');
-  const stored = db.prepare('select vpa from users where id = ?').get(bid) as { vpa: string };
-  eq(stored.vpa.includes('aarav'), false, 'UPI ID encrypted at rest');
-  const c = await call('POST', '/auth/signup', null, { name: 'Chai', phone: '9000000003', password: 'secret3', vpa: 'chai@ybl' });
-  eq((await call('GET', '/sync', c.json.token)).json.you.vpa, 'chai@ybl', 'UPI ID at signup');
-  eq((await call('GET', '/sync', A)).json.people.some((p: any) => p.vpa === 'chai@ybl'), false, 'strangers never see it');
-  await call('POST', '/ops', B, { ops: [{ type: 'me.set', vpa: '' }] });
-  eq((await call('GET', '/sync', A)).json.people.find((p: any) => p.id === bid).vpa, null, 'cleared UPI ID hides UPI option');
+  eq(s1.json.groups[0].kind, 'group', 'groups are full groups by default');
+  const split = await call('POST', '/ops', A, {
+    ops: [
+      { type: 'group.upsert', group: { id: 'split05', name: 'Cab home', icon: 'call-split', note: '', kind: 'split' } },
+      { type: 'person.add', groupId: 'split05', person: { id: 'friend5', name: 'Meera' } },
+      { type: 'expense.upsert', expense: { ...dinner, id: 'cab001', merchant: 'Cab home', amount: 300, groupId: 'split05', payerId: aid, shares: { [aid]: 150, friend5: 150 } } },
+    ],
+  });
+  eq(split.json.results.filter((r: any) => r.ok).length, 3, 'a quick split is one group, one person and one bill');
+  eq((await call('GET', '/sync', A)).json.groups.find((g: any) => g.id === 'split05').kind, 'split', 'split kind syncs');
+  eq((await call('GET', '/sync', A)).json.people.some((p: any) => 'vpa' in p), false, 'UPI IDs are no longer kept');
+  const columns = db.prepare('pragma table_info(users)').all() as { name: string }[];
+  eq(columns.some((col) => col.name === 'vpa'), false, 'no UPI ID column');
 
   eq((await call('GET', '/sync', 'nope')).status, 401, 'bad token');
   console.log('server check ok');

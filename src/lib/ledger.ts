@@ -190,13 +190,13 @@ export function youStillOwe(e: Expense, youId: string, rem: Record<string, Recor
   return round2(rem[e.id]?.[youId] || 0);
 }
 
-export function pocket(e: Expense, youId: string, rem: Record<string, Record<string, number>>) {
+// What this expense adds to your own spend: the whole amount for a personal expense, only your share for a split.
+// Money you paid on someone else's behalf is not spend. It shows up as "coming back" instead.
+export function pocket(e: Expense, youId: string) {
   if (e.income || e.transfer) return 0;
   if (!e.groupId) return e.amount;
   if (!e.reflect) return 0;
-  const yourShare = e.shares?.[youId] ?? 0;
-  if (e.payerId === youId) return round2(yourShare + owedBack(e, youId, rem));
-  return yourShare;
+  return e.shares?.[youId] ?? 0;
 }
 
 export function countsAsSpend(e: Expense) {
@@ -213,9 +213,12 @@ export function monthBounds(y: number, m: number) {
   return { from: `${y}-${String(m).padStart(2, '0')}-01`, to: `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}` };
 }
 
+// Your own spend in a range: personal expenses in full, split expenses at your share only.
+// `back` is what friends still owe you on splits you paid for. It is not spend, so it is kept apart.
 export function spendIn(expenses: Expense[], settlements: Settlement[], youId: string, from: string, to: string) {
   const rem = remainingOwed(expenses, settlements);
   let total = 0;
+  let back = 0;
   let count = 0;
   const byDay: Record<string, { total: number; count: number }> = {};
   const byTag: Record<string, number> = {};
@@ -223,9 +226,8 @@ export function spendIn(expenses: Expense[], settlements: Settlement[], youId: s
   for (const e of expenses) {
     if (!countsAsSpend(e)) continue;
     if (!inRange(e.at, from, to)) continue;
-    const v = pocket(e, youId, rem);
-    if (v <= 0 && e.groupId && !e.reflect) continue;
-    const amount = e.groupId ? v : e.amount;
+    if (e.groupId && e.reflect) back += owedBack(e, youId, rem);
+    const amount = pocket(e, youId);
     if (amount <= 0) continue;
     total += amount;
     count += 1;
@@ -241,19 +243,18 @@ export function spendIn(expenses: Expense[], settlements: Settlement[], youId: s
     merch.v += amount;
     byMerchant[e.merchant] = merch;
   }
-  return { total: round2(total), count, byDay, byTag, byMerchant };
+  return { total: round2(total), back: round2(back), count, byDay, byTag, byMerchant };
 }
 
 export type Moved = { at: string; e: Expense } | { at: string; s: Settlement };
 
 /**
- * Money that actually left or came back: your own spends, the full amount of group bills you paid,
- * and settle-ups. `net` is out minus repayments; `owed` is what is still coming back on bills in range.
+ * Your spend for Insights. Same rule as spendIn: only your share counts. `owed` is what is still coming back
+ * to you on bills you paid in the range. Settle-ups are listed in `items` but never change the spend.
  */
 export function cashFlow(expenses: Expense[], settlements: Settlement[], youId: string, from: string, to: string) {
   const rem = remainingOwed(expenses, settlements);
-  let out = 0;
-  let back = 0;
+  let spent = 0;
   let owed = 0;
   let recurring = 0;
   let count = 0;
@@ -261,39 +262,32 @@ export function cashFlow(expenses: Expense[], settlements: Settlement[], youId: 
   const byDay: Record<string, number> = {};
   const byTag: Record<string, number> = {};
   const byMerchant: Record<string, { n: number; v: number }> = {};
-  const spend = (at: string, v: number) => {
-    out += v;
-    byDay[dayKey(at)] = (byDay[dayKey(at)] || 0) + v;
-  };
   for (const e of expenses) {
-    if (!inRange(e.at, from, to) || (e.groupId && !(e.reflect && e.payerId === youId))) continue;
+    if (!inRange(e.at, from, to) || (e.groupId && !e.reflect)) continue;
     items.push({ at: e.at, e });
     if (!countsAsSpend(e)) continue;
-    spend(e.at, e.amount);
-    count += 1;
     owed += owedBack(e, youId, rem);
-    if (e.recurring) recurring += e.amount;
+    const v = pocket(e, youId);
+    if (v <= 0) continue;
+    spent += v;
+    count += 1;
+    byDay[dayKey(e.at)] = (byDay[dayKey(e.at)] || 0) + v;
+    if (e.recurring) recurring += v;
     const tag = e.tag || 'untagged';
-    byTag[tag] = (byTag[tag] || 0) + e.amount;
+    byTag[tag] = (byTag[tag] || 0) + v;
     const merch = byMerchant[e.merchant] ?? { n: 0, v: 0 };
     merch.n += 1;
-    merch.v += e.amount;
+    merch.v += v;
     byMerchant[e.merchant] = merch;
   }
   for (const s of settlements) {
     if (!inRange(s.at, from, to) || (s.fromId !== youId && s.toId !== youId)) continue;
     items.push({ at: s.at, s });
-    if (s.fromId === youId) spend(s.at, s.amount);
-    else back += s.amount;
   }
   items.sort((a, b) => b.at.localeCompare(a.at));
-  const net = Math.max(0, out - back);
   return {
-    out: round2(out),
-    back: round2(back),
-    net: round2(net),
-    owed: round2(Math.min(owed, net)),
-    real: round2(Math.max(0, net - owed)),
+    spent: round2(spent),
+    owed: round2(owed),
     recurring: round2(recurring),
     count,
     items,

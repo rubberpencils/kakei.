@@ -35,7 +35,7 @@ export function Splash({ ready, onDone }: { ready: boolean; onDone: () => void }
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.wrap, { pointerEvents: 'none' }, wrap]}>
       <Animated.View style={[styles.row, mark]}>
-        {'kakie'.split('').map((ch, i) => (
+        {'Kakei'.split('').map((ch, i) => (
           <Animated.View key={i} entering={reduce ? undefined : FadeInDown.delay(80 + i * 55).duration(420).easing(Easing.out(Easing.exp))}>
             <Text style={styles.word}>{ch}</Text>
           </Animated.View>

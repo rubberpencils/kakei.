@@ -41,7 +41,7 @@ export default function GroupSettings() {
   };
   const share = () => {
     if (!group.code) return store.flash('The code appears once the group reaches the server');
-    Share.share({ message: `Join "${group.name}" on kakie. with code ${group.code}\nkakie://join?code=${group.code}` });
+    Share.share({ message: `Join "${group.name}" on Kakei. with code ${group.code}\nkakie://join?code=${group.code}` });
   };
   const remove = () => {
     const go = () => {
@@ -95,7 +95,7 @@ export default function GroupSettings() {
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>{p.id === store.you.id ? `${p.name} (you)` : p.name}</Text>
             <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 1 }}>
-              {p.id === store.you.id || p.claimed ? 'On kakie.' : 'Not joined yet. They pick this name when joining.'}
+              {p.id === store.you.id || p.claimed ? 'On Kakei.' : 'Not joined yet. They pick this name when joining.'}
             </Text>
           </View>
         </Press>
