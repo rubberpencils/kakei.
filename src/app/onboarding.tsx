@@ -93,8 +93,11 @@ export default function Onboarding() {
           {step === 1 ? (
             <View style={{ flex: 1 }}>
               <Back to={() => go(0)} />
-              <Animated.View entering={rise(0)} style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.brandSoft, alignItems: 'center', justifyContent: 'center', marginTop: 20, transform: [{ rotate: '-6deg' }] }}>
-                <Icon name="message-text-outline" size={26} color={c.brandInk} />
+              {/* The tilt lives on an inner view so the entrance animation on the wrapper cannot overwrite it. */}
+              <Animated.View entering={rise(0)} style={{ marginTop: 20, alignSelf: 'flex-start' }}>
+                <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.brandSoft, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-6deg' }] }}>
+                  <Icon name="message-text-outline" size={26} color={c.brandInk} />
+                </View>
               </Animated.View>
               <Animated.View entering={rise(1)}>
                 <Word size={32} style={{ marginTop: 20, lineHeight: 36 }}>{ios ? 'Set up with Shortcuts' : 'Connect bank SMS'}</Word>
@@ -282,7 +285,7 @@ function Account({
         )}
       </Animated.View>
       <Animated.View entering={rise(3)} style={{ marginTop: 28, paddingTop: 20, borderTopWidth: 1, borderTopColor: c.faint }}>
-        <PrivacyNote />
+        <PrivacyNote collapsible title={store.local ? 'Why sync, and what stays on your phone' : 'Why an account, and what stays on your phone'} />
       </Animated.View>
       <View style={{ flex: 1, minHeight: 24 }} />
       <Dots n={3} />
