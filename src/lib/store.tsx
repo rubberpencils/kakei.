@@ -37,6 +37,8 @@ type Local = {
   connecting: boolean;
   outbox: Queued[];
   syncedAt: number | null;
+  // Older versions uploaded personal spends. Set once the server has been asked to forget them.
+  cleaned: boolean;
 };
 
 const NOBODY: Person = { id: 'me', name: 'You', initials: 'YO' };
@@ -61,6 +63,7 @@ const FRESH: Local = {
   connecting: false,
   outbox: [],
   syncedAt: null,
+  cleaned: false,
 };
 
 type SmsIn = { sender: string; body: string; date: number };
@@ -120,9 +123,35 @@ function applyOp(s: Local, op: Op): Local {
         tags: op.prefs.tags ?? s.tags,
         history: op.prefs.history ?? s.history,
       };
+    case 'personal.purge':
+      return s;
     case 'me.set':
       return { ...s, you: person(s.you.id, op.name ?? s.you.name, s.you.claimed) };
   }
+}
+
+/**
+ * Only what a group needs goes to the server: groups, their people, group expenses and settlements, and your name.
+ * Personal spends, budget, tags and history never leave the phone. Pass the state from before the change, so a delete
+ * can tell whether the expense it removes was shared.
+ */
+function isShared(before: Local, op: Op): boolean {
+  switch (op.type) {
+    case 'expense.upsert':
+      return !!op.expense.groupId;
+    case 'expense.delete':
+      return !!before.expenses.find((e) => e.id === op.id)?.groupId;
+    case 'prefs.set':
+    case 'personal.purge':
+      return false;
+    default:
+      return true;
+  }
+}
+
+// What the server is sent. Which of your accounts paid stays with you.
+function scrub(op: Op): Op {
+  return op.type === 'expense.upsert' ? { ...op, expense: { ...op.expense, account: null, bank: null } } : op;
 }
 
 function enqueue(s: Local, ops: Op[]): Local {
@@ -130,7 +159,9 @@ function enqueue(s: Local, ops: Op[]): Local {
   for (const op of ops) next = applyOp(next, op);
   // Without an account there is nothing to send to.
   if (!next.token) return next;
-  return { ...next, outbox: [...next.outbox, ...ops.map((op) => ({ ...op, qid: uid() }) as Queued)] };
+  const shared = ops.filter((op) => isShared(s, op));
+  if (!shared.length) return next;
+  return { ...next, outbox: [...next.outbox, ...shared.map((op) => ({ ...op, qid: uid() }) as Queued)] };
 }
 
 // Local data gets the server's id for "you" when an account is made, so the bills you paid stay yours.
@@ -161,24 +192,30 @@ function snapshotOps(s: Local): Op[] {
       if (p) ops.push({ type: 'person.add', groupId: g.id, person: { id: p.id, name: p.name } });
     }
   }
-  for (const expense of s.expenses) ops.push({ type: 'expense.upsert', expense });
+  // Group expenses only. Personal spends, budget and tags stay on the phone.
+  for (const expense of s.expenses) if (expense.groupId) ops.push({ type: 'expense.upsert', expense });
   for (const settlement of s.settlements) ops.push({ type: 'settlement.upsert', settlement });
-  ops.push({ type: 'prefs.set', prefs: { budget: s.budget, tags: s.tags, history: s.history } });
   return ops;
 }
 
+// The server owns shared data. Your own spends, budget, tags and history are never taken from it, only kept.
 function rebase(s: Local, r: Remote): Local {
+  const mine = new Map(s.expenses.map((e) => [e.id, e]));
+  // The server does not keep which account paid, so put back what this phone already knows.
+  const shared = r.expenses
+    .filter((e) => e.groupId)
+    .map((e) => {
+      const local = mine.get(e.id);
+      return local?.account ? { ...e, account: local.account, bank: local.bank ?? null } : e;
+    });
   let next: Local = {
     ...s,
     you: person(r.you.id, r.you.name),
     phone: r.you.phone,
     people: r.people.map((p) => person(p.id, p.name, p.claimed)),
     groups: r.groups,
-    expenses: r.expenses,
+    expenses: [...shared, ...s.expenses.filter((e) => !e.groupId)],
     settlements: r.settlements,
-    tags: r.prefs.tags ?? s.tags,
-    budget: r.prefs.budget ?? 0,
-    history: r.prefs.history ?? [],
     syncedAt: Date.now(),
   };
   for (const op of s.outbox) next = applyOp(next, op);
@@ -313,7 +350,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       timer.current = setTimeout(() => setToast(''), 2400);
     };
     const commit = (ops: Op[]) => setS((x) => enqueue(x, ops));
-    const signOutLocal = () => setS((x) => ({ ...FRESH, base: x.base }));
+    // Signing out only drops the shared side. Your own spends, budget and tags are on this phone and stay.
+    const signOutLocal = () =>
+      setS((x) => ({
+        ...FRESH,
+        base: x.base,
+        queue: x.queue,
+        seen: x.seen,
+        smsOn: x.smsOn,
+        dev: x.dev,
+        tags: x.tags,
+        budget: x.budget,
+        history: x.history,
+        expenses: x.expenses.filter((e) => !e.groupId),
+        you: x.you,
+        local: true,
+      }));
+    const eraseAll = () => setS((x) => ({ ...FRESH, base: x.base }));
 
     const syncNow = async () => {
       const { token, base } = cur.current;
@@ -330,13 +383,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         for (let i = 0; i < queued.length; i += 400) {
           const sent = queued.slice(i, i + 400);
           const res = await call<{ results: { ok: boolean; error?: string }[] }>(base, token, 'POST', '/ops', {
-            ops: sent.map(({ qid: _qid, ...op }) => op),
+            ops: sent.map(({ qid: _qid, ...op }) => scrub(op as Op)),
           });
           const bad = res.results.find((r) => !r.ok);
           if (bad?.error) flash(bad.error);
           const done = new Set(sent.map((o) => o.qid));
           setS((x) => ({ ...x, outbox: x.outbox.filter((o) => !done.has(o.qid)) }));
           cur.current = { ...cur.current, outbox: cur.current.outbox.filter((o) => !done.has(o.qid)) };
+        }
+        // Older versions uploaded personal spends. Once this phone holds its own copy, ask the server to forget them.
+        if (!cur.current.cleaned && cur.current.expenses.some((e) => !e.groupId)) {
+          await call(base, token, 'POST', '/ops', { ops: [{ type: 'personal.purge' }] });
+          setS((x) => ({ ...x, cleaned: true }));
+          cur.current = { ...cur.current, cleaned: true };
         }
         const remote = await call<Remote>(base, token, 'GET', '/sync');
         setS((x) => (x.token === token ? rebase(x, remote) : x));
@@ -420,8 +479,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
       signOut: () => {
         const { base, token } = cur.current;
-        if (token) call(base, token, 'POST', '/auth/logout').catch(() => {});
-        signOutLocal();
+        if (token) {
+          call(base, token, 'POST', '/auth/logout').catch(() => {});
+          signOutLocal();
+        } else {
+          eraseAll();
+        }
       },
       setSmsOn: (smsOn) => setS((x) => ({ ...x, smsOn })),
       setName: (name) => {

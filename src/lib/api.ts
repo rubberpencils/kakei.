@@ -11,7 +11,9 @@ export type Op =
   | { type: 'settlement.upsert'; settlement: Settlement }
   | { type: 'settlement.delete'; id: string }
   | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[] } }
-  | { type: 'me.set'; name?: string };
+  | { type: 'me.set'; name?: string }
+  // Asks the server to forget personal data that older versions of the app uploaded.
+  | { type: 'personal.purge' };
 
 export type Queued = Op & { qid: string };
 

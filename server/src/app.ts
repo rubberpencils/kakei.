@@ -2,6 +2,8 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
+import { makeVault } from './vault.ts';
+
 type Row = Record<string, any>;
 type User = { id: string; name: string; phone: string };
 
@@ -91,7 +93,9 @@ async function readBody(req: IncomingMessage): Promise<Row> {
 // A stolen token stops working after this long. People sign in again.
 const SESSION_MS = 90 * 24 * 3600 * 1000;
 
-export function createApp(db: DatabaseSync, opts: { cors: string }) {
+export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer }) {
+  // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
+  const vault = makeVault(opts.key ?? randomBytes(32));
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).all(...args) as Row[];
   const run = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).run(...args);
@@ -106,6 +110,13 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
     if (!one('select 1 from groups where id = ?', groupId)) fail(404, 'Group not found');
     if (!memberOf(groupId, uid)) fail(403, 'You are not in this group');
   };
+
+  // Seal anything saved before sealing existed.
+  for (const table of ['expenses', 'settlements']) {
+    for (const r of all(`select id, data from ${table}`)) {
+      if (!vault.isSealed(r.data)) run(`update ${table} set data = ? where id = ?`, vault.seal(r.data), r.id);
+    }
+  }
 
   const membersOf = (groupId: string) =>
     new Set(all('select person_id from members where group_id = ?', groupId).map((r) => r.person_id as string));
@@ -191,14 +202,14 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
     );
     const hidden = new Set(all('select expense_id from hidden where user_id = ?', uid).map((r) => r.expense_id as string));
     const expenses = all(
-      `select data from expenses where (group_id is null and owner_id = ?) or group_id in (${mine})`,
-      uid, uid,
+      // Only group expenses. A personal expense never needs to be here, so old ones are not sent back.
+      `select data from expenses where group_id in (${mine})`,
+      uid,
     ).map((r) => {
-      const e = JSON.parse(r.data);
+      const e = JSON.parse(vault.open(r.data));
       return { ...e, reflect: !hidden.has(e.id) };
     });
-    const settlements = all(`select data from settlements where group_id in (${mine})`, uid).map((r) => JSON.parse(r.data));
-    const prefs = one('select data from prefs where user_id = ?', uid);
+    const settlements = all(`select data from settlements where group_id in (${mine})`, uid).map((r) => JSON.parse(vault.open(r.data)));
     return {
       you: user,
       people: people.map((p) => ({ id: p.id, name: p.name, claimed: !!p.user_id })),
@@ -216,7 +227,8 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
       })),
       expenses,
       settlements,
-      prefs: prefs ? JSON.parse(prefs.data) : {},
+      // Budget, tags and history stay on the phone. Kept as an empty object so older apps still read the reply.
+      prefs: {},
     };
   }
 
@@ -281,6 +293,8 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
       case 'expense.upsert': {
         const e = obj(op.expense, 'expense');
         const id = ident(e.id, 'expense id');
+        // Only shared expenses live here. A personal one stays on its owner's phone, so it is ignored, not stored.
+        if (e.groupId == null) return;
         const existing = one('select owner_id, group_id from expenses where id = ?', id);
         if (existing) canTouchExpense(existing, uid);
         const amount = money(e.amount, 'Amount');
@@ -317,15 +331,16 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
           groupId,
           payerId,
           shares,
-          account: optText(e.account, 8, 'account'),
-          bank: optText(e.bank, 24, 'bank'),
+          // Which of your accounts paid is your business, not the group's.
+          account: null,
+          bank: null,
           note: typeof e.note === 'string' ? e.note.slice(0, 200) : '',
           sample: !!e.sample,
         };
         run(
           `insert into expenses (id, owner_id, group_id, data, updated) values (?, ?, ?, ?, ?)
            on conflict(id) do update set group_id = excluded.group_id, data = excluded.data, updated = excluded.updated`,
-          id, existing?.owner_id ?? uid, groupId, JSON.stringify(data), Date.now(),
+          id, existing?.owner_id ?? uid, groupId, vault.seal(JSON.stringify(data)), Date.now(),
         );
         if (e.reflect === false) run('insert or ignore into hidden (user_id, expense_id) values (?, ?)', uid, id);
         else run('delete from hidden where user_id = ? and expense_id = ?', uid, id);
@@ -359,7 +374,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
         run(
           `insert into settlements (id, group_id, data, updated) values (?, ?, ?, ?)
            on conflict(id) do update set data = excluded.data, updated = excluded.updated`,
-          id, groupId, JSON.stringify(data), Date.now(),
+          id, groupId, vault.seal(JSON.stringify(data)), Date.now(),
         );
         return;
       }
@@ -371,29 +386,14 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
         run('delete from settlements where id = ?', id);
         return;
       }
-      case 'prefs.set': {
-        const p = obj(op.prefs, 'prefs');
-        const row = one('select data from prefs where user_id = ?', uid);
-        const cur: Row = row ? JSON.parse(row.data) : {};
-        if ('budget' in p) cur.budget = money(p.budget, 'Budget', true);
-        if ('tags' in p) {
-          if (!Array.isArray(p.tags) || p.tags.length > 300) fail(400, 'tags are invalid');
-          cur.tags = p.tags.map((t: unknown) => text(t, 24, 'Tag'));
-        }
-        if ('history' in p) {
-          if (!Array.isArray(p.history) || p.history.length > 120) fail(400, 'history is invalid');
-          cur.history = p.history.map((h: unknown) => {
-            const r = obj(h, 'month');
-            if (!Number.isInteger(r.y) || !Number.isInteger(r.m) || r.m < 1 || r.m > 12) fail(400, 'month is invalid');
-            return { y: r.y, m: r.m, spent: money(r.spent, 'spent', true), sample: !!r.sample };
-          });
-        }
-        run(
-          'insert into prefs (user_id, data) values (?, ?) on conflict(user_id) do update set data = excluded.data',
-          uid, JSON.stringify(cur),
-        );
+      case 'prefs.set':
+        // Budget, tags and history are personal. Older apps still send them, and they are dropped here.
         return;
-      }
+      case 'personal.purge':
+        // The phone asks once, after it has its own copy, to clear what older versions uploaded.
+        run('delete from expenses where group_id is null and owner_id = ?', uid);
+        run('delete from prefs where user_id = ?', uid);
+        return;
       case 'me.set': {
         if (op.name !== undefined) {
           const name = text(op.name, 40, 'Name');
@@ -460,16 +460,16 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
       const swap = (id: string) => (id === claimId ? uid : id);
       run('update members set person_id = ? where group_id = ? and person_id = ?', uid, g.id, claimId);
       for (const r of all('select id, data from expenses where group_id = ?', g.id)) {
-        const e = JSON.parse(r.data);
+        const e = JSON.parse(vault.open(r.data));
         e.payerId = e.payerId ? swap(e.payerId) : e.payerId;
         e.shares = Object.fromEntries(Object.entries(e.shares ?? {}).map(([k, v]) => [swap(k), v]));
-        run('update expenses set data = ?, updated = ? where id = ?', JSON.stringify(e), Date.now(), r.id);
+        run('update expenses set data = ?, updated = ? where id = ?', vault.seal(JSON.stringify(e)), Date.now(), r.id);
       }
       for (const r of all('select id, data from settlements where group_id = ?', g.id)) {
-        const s = JSON.parse(r.data);
+        const s = JSON.parse(vault.open(r.data));
         s.fromId = swap(s.fromId);
         s.toId = swap(s.toId);
-        run('update settlements set data = ?, updated = ? where id = ?', JSON.stringify(s), Date.now(), r.id);
+        run('update settlements set data = ?, updated = ? where id = ?', vault.seal(JSON.stringify(s)), Date.now(), r.id);
       }
       run('delete from people where id = ? and id not in (select person_id from members)', claimId);
     });

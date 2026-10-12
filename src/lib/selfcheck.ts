@@ -11,6 +11,8 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 const samples: [string, string, Record<string, unknown>][] = [
   ['VM-HDFCBK', 'Rs.1240.00 debited from A/c XX4521 on 28-09-26 to VPA swiggy@icici. UPI Ref 426781234.', { amount: 1240, income: false, rail: 'upi', merchant: 'Swiggy', tag: 'food', account: '4521', bank: 'HDFC' }],
   ['AD-ICICIT', 'INR 3,499.00 spent using ICICI Bank Card XX9012 on 28-Sep-26 on AMAZON PAY IN.', { amount: 3499, income: false, rail: 'credit', merchant: 'Amazon', tag: 'shopping', account: '9012' }],
+  ['VM-HDFCBK', 'Rs.2499.00 spent on HDFC Bank CC XX1234 on 28-09-26 at AMAZON.', { amount: 2499, rail: 'credit', account: '1234' }],
+  ['AX-AXISBK', 'INR 5,000.00 debited from A/c no. XX3308 on 27-09-26 towards HDFC Bank CC XX2207 payment.', { amount: 5000, transfer: true }],
   ['VM-HDFCBK', 'Rs.386.00 debited from A/c XX4521 on 28-09-26 to VPA uber.india@axisbank.', { amount: 386, rail: 'upi', merchant: 'Uber', tag: 'transport' }],
   ['JD-SBIINB', 'Your A/c XX7710 is credited Rs.85,000.00 on 25/09/26 by NEFT-ACME TECHNOLOGIES PVT LTD SALARY SEP26.', { amount: 85000, income: true, rail: 'neft', merchant: 'Acme Technologies', tag: 'salary' }],
   ['VM-HDFCBK', 'Rs.2150.00 debited from A/c XX4521 on 27-09-26 to VPA blinkit.payu@hdfcbank.', { merchant: 'Blinkit', tag: 'groceries', rail: 'upi' }],

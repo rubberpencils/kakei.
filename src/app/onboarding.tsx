@@ -14,17 +14,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Back, Body, Button, buzz, Field, Ghost, Icon, Press, Word, Wordmark, useDark, usePalette } from '@/components/ui';
+import { PrivacyNote } from '@/components/privacy';
 import { DEFAULT_API, isOfficial, serverName } from '@/lib/api';
 import { inr } from '@/lib/format';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
-
-const FEATURES = [
-  { icon: 'message-text-outline', title: 'Bank SMS, auto-read', body: 'Every debit alert is parsed on this phone. UPI, card, NEFT, IMPS, debit. You confirm each one.' },
-  { icon: 'tag-outline', title: 'One tap to tag', body: 'Type to match a tag or create one. One tag per expense keeps it clean.' },
-  { icon: 'account-group-outline', title: 'Split with anyone', body: 'Drop a spend into a group, pick who paid, and watch balances shrink as people settle.' },
-];
 
 const ease = Easing.out(Easing.exp);
 
@@ -34,7 +29,7 @@ export default function Onboarding() {
   const reduce = useReducedMotion();
   const store = useStore();
   // Someone already using Kakei on this phone who taps "Sync with friends" lands straight on the account step.
-  const [step, setStep] = useState(store.local ? 4 : 0);
+  const [step, setStep] = useState(store.local ? 3 : 0);
   const [dir, setDir] = useState(1);
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
   const [budget, setBudget] = useState(30000);
@@ -47,7 +42,7 @@ export default function Onboarding() {
 
   const allow = async () => {
     if (ios) {
-      go(3);
+      go(2);
       return;
     }
     const result = await readDeviceSms();
@@ -58,7 +53,7 @@ export default function Onboarding() {
       store.setSmsOn(true);
       store.flash(n ? `${n} bank messages ready to review` : 'No bank messages yet');
     }
-    go(3);
+    go(2);
   };
 
   const enter = reduce ? FadeIn.duration(200) : (dir > 0 ? FadeInRight : FadeInLeft).duration(340).easing(ease);
@@ -90,7 +85,7 @@ export default function Onboarding() {
               <Animated.View entering={rise(6)}>
                 <Dots n={0} />
                 <Button label="Get started" icon="arrow-right" onPress={() => go(1)} />
-                <Ghost label="I already have an account" onPress={() => { setMode('login'); go(4); }} />
+                <Ghost label="I already have an account" onPress={() => { setMode('login'); go(3); }} />
               </Animated.View>
             </View>
           ) : null}
@@ -98,18 +93,6 @@ export default function Onboarding() {
           {step === 1 ? (
             <View style={{ flex: 1 }}>
               <Back to={() => go(0)} />
-              <View style={{ flex: 1, justifyContent: 'center', gap: 30 }}>
-                {FEATURES.map((f, i) => <Feature key={f.title} f={f} i={i} reduce={reduce} />)}
-              </View>
-              <Dots n={1} />
-              <Button label={ios ? 'Set up bank SMS' : 'Connect my bank SMS'} onPress={() => go(2)} />
-              <Ghost label="I'll add manually" onPress={() => go(3)} />
-            </View>
-          ) : null}
-
-          {step === 2 ? (
-            <View style={{ flex: 1 }}>
-              <Back to={() => go(1)} />
               <Animated.View entering={rise(0)} style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.brandSoft, alignItems: 'center', justifyContent: 'center', marginTop: 20, transform: [{ rotate: '-6deg' }] }}>
                 <Icon name="message-text-outline" size={26} color={c.brandInk} />
               </Animated.View>
@@ -130,21 +113,21 @@ export default function Onboarding() {
                   </>
                 ) : (
                   <>
-                    <Note i={2} reduce={reduce} icon="lock-outline" title="Parsed on this phone" sub="Only amount, merchant, date, and rail are synced. The message text stays here." />
+                    <Note i={2} reduce={reduce} icon="lock-outline" title="Parsed on this phone" sub="The message text never leaves it. Your spends stay here too, unless you add one to a group." />
                     <Note i={3} reduce={reduce} icon="filter-outline" title="Transactional messages only" sub="Banks, cards, and wallets. OTPs and chats are skipped." />
                     <Note i={4} reduce={reduce} icon="check-circle-outline" title="You confirm every entry" sub="Nothing enters the ledger until you tap confirm." />
                   </>
                 )}
               </ScrollView>
-              <Dots n={2} />
+              <Dots n={1} />
               <Button label={ios ? 'Done, continue' : 'Allow SMS access'} onPress={allow} />
-              <Ghost label="Skip for now" onPress={() => go(3)} />
+              <Ghost label="I'll add spends by hand" onPress={() => go(2)} />
             </View>
           ) : null}
 
-          {step === 3 ? <Budget budget={budget} setBudget={setBudget} back={() => go(2)} onNext={() => go(4)} rise={rise} /> : null}
+          {step === 2 ? <Budget budget={budget} setBudget={setBudget} back={() => go(1)} onNext={() => go(3)} rise={rise} /> : null}
 
-          {step === 4 ? <Account mode={mode} setMode={setMode} budget={mode === 'signup' ? budget : 0} back={() => (store.local ? store.cancelConnect() : go(mode === 'login' ? 0 : 3))} rise={rise} /> : null}
+          {step === 3 ? <Account mode={mode} setMode={setMode} budget={mode === 'signup' ? budget : 0} back={() => (store.local ? store.cancelConnect() : go(mode === 'login' ? 0 : 2))} rise={rise} /> : null}
         </Animated.View>
       </View>
     </KeyboardAvoidingView>
@@ -204,7 +187,7 @@ function Budget({
         />
       </Animated.View>
       <View style={{ flex: 1, minHeight: 24 }} />
-      <Dots n={3} />
+      <Dots n={2} />
       <Button label={chosen > 0 ? `Use ₹${inr(chosen)}` : 'Pick a budget'} onPress={onNext} disabled={!(chosen > 0)} />
     </ScrollView>
   );
@@ -298,8 +281,11 @@ function Account({
           </Press>
         )}
       </Animated.View>
+      <Animated.View entering={rise(3)} style={{ marginTop: 28, paddingTop: 20, borderTopWidth: 1, borderTopColor: c.faint }}>
+        <PrivacyNote />
+      </Animated.View>
       <View style={{ flex: 1, minHeight: 24 }} />
-      <Dots n={4} />
+      <Dots n={3} />
       <Button label={busy ? 'One sec' : mode === 'signup' ? 'Create account' : 'Log in'} onPress={submit} disabled={busy} />
       <Ghost
         label={mode === 'signup' ? 'I already have an account' : 'New here? Make an account'}
@@ -403,29 +389,11 @@ function Demo({ reduce }: { reduce: boolean }) {
   );
 }
 
-const TILT = ['-6deg', '5deg', '-3deg'];
-
-function Feature({ f, i, reduce }: { f: (typeof FEATURES)[number]; i: number; reduce: boolean }) {
-  const c = usePalette();
-  const solid = i === 0;
-  return (
-    <Animated.View entering={reduce ? undefined : FadeInDown.delay(120 + i * 90).duration(440).easing(ease)} style={{ flexDirection: 'row', gap: 18 }}>
-      <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: solid ? c.brand : c.brandSoft, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: TILT[i] }] }}>
-        <Icon name={f.icon} size={24} color={solid ? c.brandFg : c.brandInk} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontFamily: font.semi, fontSize: 17, color: c.fg, marginBottom: 4 }}>{f.title}</Text>
-        <Body color={c.mut} style={{ lineHeight: 21, fontSize: 14 }}>{f.body}</Body>
-      </View>
-    </Animated.View>
-  );
-}
-
 function Dots({ n }: { n: number }) {
   const c = usePalette();
   return (
     <View style={{ flexDirection: 'row', gap: 5, justifyContent: 'center', marginBottom: 24 }}>
-      {[0, 1, 2, 3, 4].map((i) => (
+      {[0, 1, 2, 3].map((i) => (
         <Animated.View
           key={i}
           entering={i === n ? FadeIn.duration(200) : undefined}

@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 
 import { createApp } from './app.ts';
 import { openDb } from './db.ts';
+import { loadKey } from './vault.ts';
 
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? '0.0.0.0';
@@ -11,7 +12,7 @@ const dbPath = process.env.DB_PATH ?? './data/kakei.db';
 
 mkdirSync(dirname(dbPath), { recursive: true });
 
-const server = createApp(openDb(dbPath), { cors: process.env.CORS_ORIGIN ?? '*' });
+const server = createApp(openDb(dbPath), { cors: process.env.CORS_ORIGIN ?? '*', key: loadKey(dbPath) });
 
 server.listen(port, host, () => {
   console.log(`kakei. server listening on ${host}:${port}, db ${dbPath}`);

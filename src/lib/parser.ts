@@ -111,9 +111,12 @@ export function parseSms(sender: string, body: string): ParsedSms | null {
   if (!credited && !debited) return null;
   const income = credited && !debited;
 
-  const transfer = /credit card[\s\S]{0,40}payment|towards[\s\S]{0,40}credit card|card bill/i.test(body);
+  // Paying the card off is a transfer, not spend, even when the bank writes the card as "CC".
+  const transfer = /credit card[\s\S]{0,40}payment|towards[\s\S]{0,40}(?:credit card|\scc\s)|\scc\s[\s\S]{0,30}payment|card bill/i.test(body);
   let rail: Rail = 'debit';
-  if (/vpa\b|\bupi\b|@[a-z]{2,}/i.test(body) && !/spent using/i.test(body)) rail = 'upi';
+  // Banks write "CC" for credit card, with a space either side. That beats every other hint.
+  if (!transfer && /\sCC\s/.test(body)) rail = 'credit';
+  else if (/vpa\b|\bupi\b|@[a-z]{2,}/i.test(body) && !/spent using/i.test(body)) rail = 'upi';
   else if (/spent using|credit card/i.test(body) && !transfer) rail = 'credit';
   else if (/\bimps\b/i.test(body)) rail = 'imps';
   else if (/\bneft\b|\brtgs\b/i.test(body)) rail = 'neft';
