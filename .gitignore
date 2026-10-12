@@ -31,13 +31,22 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
 *.tsbuildinfo
+.tmp-check/
 
 example
 
 # generated native folders
 /ios
 /android
+
+# native module build output
+modules/*/android/build/
+modules/*/android/.gradle/
+
+# this repo uses npm (package-lock.json)
+pnpm-lock.yaml
