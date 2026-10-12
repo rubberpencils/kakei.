@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { Input } from '@/components/input';
 import { Back, Body, Button, buzz, Icon, Press, Screen, Word, usePalette } from '@/components/ui';
 import type { Invite } from '@/lib/api';
 import { initials } from '@/lib/format';
@@ -63,13 +64,14 @@ export default function Join() {
         <Body color={c.mut} style={{ marginTop: 8, lineHeight: 21 }}>
           Ask anyone in the group for its 6-letter code. It is on the group screen under Invite.
         </Body>
-        <TextInput
+        <Input
           value={code}
           onChangeText={(v) => { setCode(v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)); setInvite(null); }}
           placeholder="K7Q2MX"
           placeholderTextColor={c.bar}
-          autoCapitalize="characters"
-          autoCorrect={false}
+          label="Invite code"
+          caps="chars"
+          maxLength={8}
           onSubmitEditing={() => look()}
           style={{ marginTop: 24, fontFamily: font.mono, fontSize: 34, letterSpacing: 6, color: c.fg, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: error ? c.neg : c.line }}
         />

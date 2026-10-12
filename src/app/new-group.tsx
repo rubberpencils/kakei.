@@ -1,10 +1,12 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Back, Button, buzz, Icon, Press, usePalette, Word } from '@/components/ui';
+import { inr } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
 
@@ -14,8 +16,10 @@ export default function NewGroup() {
   const c = usePalette();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { createGroup } = useStore();
-  const [name, setName] = useState('');
+  const { expenseId } = useLocalSearchParams<{ expenseId?: string }>();
+  const { createGroup, groupFromExpense, expenses } = useStore();
+  const from = expenseId ? expenses.find((e) => e.id === expenseId) : undefined;
+  const [name, setName] = useState(from?.merchant ?? '');
   const [icon, setIcon] = useState(ICONS[0]);
   const [who, setWho] = useState('');
   const [members, setMembers] = useState<string[]>([]);
@@ -28,14 +32,24 @@ export default function NewGroup() {
   const create = () => {
     if (!name.trim()) return;
     buzz('done');
-    const id = createGroup(name.trim(), who.trim() && !members.includes(who.trim()) ? [...members, who.trim()] : members, icon);
-    router.replace({ pathname: '/group/[id]', params: { id } });
+    const people = who.trim() && !members.includes(who.trim()) ? [...members, who.trim()] : members;
+    const id = from ? groupFromExpense(from.id, name.trim(), people, icon) : createGroup(name.trim(), people, icon);
+    if (id) router.replace({ pathname: '/group/[id]', params: { id } });
   };
+  const split = from ? from.amount / (members.length + 1 + (who.trim() && !members.includes(who.trim()) ? 1 : 0)) : 0;
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 32 }} keyboardShouldPersistTaps="handled">
       <Back />
-      <Word size={28}>New group</Word>
-      <TextInput value={name} onChangeText={setName} autoFocus placeholder="Goa trip, Flat 4B..." placeholderTextColor={c.mut} style={{ marginTop: 24, fontFamily: font.semi, fontSize: 20, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
+      <Word size={28}>{from ? 'Make a group' : 'New group'}</Word>
+      {from ? (
+        <View style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: c.sub }}>
+          <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }} numberOfLines={1}>{from.merchant}</Text>
+          <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 2 }}>
+            ₹{inr(from.amount)} goes in as the first expense, paid by you and split equally{members.length ? `, about ₹${inr(split)} each` : ''}.
+          </Text>
+        </View>
+      ) : null}
+      <Input value={name} onChangeText={setName} autoFocus={!from} placeholder="Goa trip, Flat 4B..." label="Group name" caps="words" style={{ marginTop: 24, fontFamily: font.semi, fontSize: 20, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
         {ICONS.map((i) => (
           <Press key={i} onPress={() => setIcon(i)} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: icon === i ? c.acc : c.sub, alignItems: 'center', justifyContent: 'center' }}>
@@ -45,8 +59,8 @@ export default function NewGroup() {
       </View>
       <Text style={{ marginTop: 28, fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>PEOPLE</Text>
       <Text style={{ marginTop: 4, fontFamily: font.body, fontSize: 13, color: c.mut }}>Add names now. They claim their spot later with the invite code.</Text>
-      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-        <TextInput value={who} onChangeText={setWho} onSubmitEditing={add} submitBehavior="submit" placeholder="Add a person" placeholderTextColor={c.mut} style={{ flex: 1, fontFamily: font.body, fontSize: 16, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' }}>
+        <Input value={who} onChangeText={setWho} onSubmitEditing={add} keepFocus placeholder="Add a person" label="Add a person" caps="words" style={{ flex: 1, fontFamily: font.body, fontSize: 16, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
         <Press onPress={add} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="plus" size={22} color={c.accFg} />
         </Press>
@@ -62,7 +76,7 @@ export default function NewGroup() {
         ))}
       </View>
       <View style={{ marginTop: 28 }}>
-        <Button label="Create group" onPress={create} disabled={!name.trim()} />
+        <Button label={from ? 'Create group and add bill' : 'Create group'} onPress={create} disabled={!name.trim()} />
       </View>
     </ScrollView>
   );

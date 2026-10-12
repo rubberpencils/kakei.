@@ -8,7 +8,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
   type PressableProps,
   type StyleProp,
@@ -30,6 +29,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'react-native';
 
+import { Input } from '@/components/input';
 import { dayKey, inr, monthName, prettyDay, slugTag } from '@/lib/format';
 import { owedBack, pocket, remainingOwed, youStillOwe } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
@@ -244,13 +244,13 @@ export function TagPicker({
     <View>
       <View style={[styles.search, { borderColor: c.line, backgroundColor: c.sub }]}>
         <Icon name="tag-outline" size={18} color={c.mut} />
-        <TextInput
+        <Input
           value={q}
           onChangeText={setQ}
           placeholder="Search or create a tag"
-          placeholderTextColor={c.mut}
-          autoCapitalize="none"
-          autoCorrect={false}
+          label="Tag"
+          caps="none"
+          autoFocus
           onSubmitEditing={() => query && pick(query)}
           style={[styles.input, { color: c.fg, fontFamily: font.body }]}
         />
@@ -501,15 +501,14 @@ export function Field({
   return (
     <View style={{ gap: 6 }}>
       <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.mut }}>{label}</Text>
-      <TextInput
+      <Input
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
-        placeholderTextColor={c.mut}
+        label={label}
         secureTextEntry={secure}
-        keyboardType={keyboard}
-        autoCapitalize={auto}
-        autoCorrect={false}
+        mode={keyboard === 'phone-pad' ? 'phone' : keyboard === 'number-pad' ? 'number' : 'text'}
+        caps={auto === 'words' ? 'words' : 'none'}
         style={{ height: 52, borderRadius: 16, borderWidth: 1, borderColor: error ? c.neg : c.line, paddingHorizontal: 16, fontFamily: font.body, fontSize: 16, color: c.fg }}
       />
       {error ? <Text style={{ fontFamily: font.body, fontSize: 12, color: c.neg }}>{error}</Text> : null}

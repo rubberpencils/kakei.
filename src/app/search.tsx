@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Avatar, goBack, Icon, Press, TxnRow, useDark, usePalette } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { personName, pocket } from '@/lib/ledger';
@@ -50,15 +51,13 @@ export default function Search() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24 }}>
         <View style={{ flex: 1, height: 44, borderRadius: 22, backgroundColor: c.sub, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 }}>
           <Icon name="magnify" size={20} color={c.mut} />
-          <TextInput
+          <Input
             value={raw}
             onChangeText={setRaw}
             autoFocus
             placeholder="Merchant, #tag, person, group or amount"
-            placeholderTextColor={c.mut}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
+            label="Search"
+            caps="none"
             style={{ flex: 1, fontFamily: font.body, fontSize: 15, color: c.fg, padding: 0 }}
           />
           {raw ? (

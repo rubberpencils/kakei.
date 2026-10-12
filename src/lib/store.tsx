@@ -247,6 +247,8 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   skipDraft: (id: string) => void;
   settle: (s: Omit<Settlement, 'id' | 'sample'>) => void;
   createGroup: (name: string, memberNames: string[], icon?: string) => string;
+  groupFromExpense: (expenseId: string, name: string, memberNames: string[], icon?: string) => string | null;
+  payCardBill: (bank: string | null, account: string | null, amount: number) => void;
   updateGroup: (id: string, patch: Partial<Pick<Group, 'name' | 'icon' | 'note' | 'simplify'>>) => void;
   quickSplit: (o: {
     expenseId?: string;
@@ -489,6 +491,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         commit(ops);
         return id;
+      },
+      groupFromExpense: (expenseId, name, memberNames, icon = 'account-group') => {
+        const x = cur.current;
+        const e = x.expenses.find((r) => r.id === expenseId);
+        if (!e) return null;
+        const id = uid();
+        const ids: string[] = [];
+        const ops: Op[] = [{ type: 'group.upsert', group: { id, name: name.trim() || e.merchant, icon, note: '', kind: 'group' } }];
+        for (const raw of memberNames) {
+          const n = raw.trim();
+          if (!n) continue;
+          const pid = uid();
+          ids.push(pid);
+          ops.push({ type: 'person.add', groupId: id, person: { id: pid, name: n } });
+        }
+        // The bill moves in as the first expense, paid by you and split equally. It can be edited after.
+        ops.push({ type: 'expense.upsert', expense: { ...e, groupId: id, payerId: x.you.id, shares: equalShares(e.amount, [x.you.id, ...ids]), reflect: true } });
+        commit(ops);
+        return id;
+      },
+      payCardBill: (bank, account, amount) => {        if (amount <= 0) return;
+        const id = uid();
+        commit([{
+          type: 'expense.upsert',
+          expense: {
+            id, merchant: `${bank ?? 'Credit'}${account ? ` ••${account}` : ''} card bill`, amount, at: new Date().toISOString(), tag: null, rail: 'upi',
+            income: false, transfer: true, recurring: null, recurId: null, groupId: null, payerId: null, shares: null, reflect: true,
+            ...(account ? { account, bank } : {}),
+          },
+        }]);
+        flash('Card bill marked paid');
       },
       updateGroup: (id, patch) => {
         const g = cur.current.groups.find((x) => x.id === id);

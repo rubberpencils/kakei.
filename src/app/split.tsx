@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Back, Button, buzz, goBack, Icon, Press, TagPicker, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { equalShares, percentShares, round2 } from '@/lib/ledger';
@@ -25,9 +26,11 @@ export default function Split() {
   const [desc, setDesc] = useState(editing?.merchant ?? draft?.merchant ?? '');
   const [amt, setAmt] = useState(editing ? String(editing.amount) : draft ? String(draft.amount) : '');
   const [payer, setPayer] = useState(editing?.payerId ?? store.you.id);
-  const [mode, setMode] = useState<Mode>(editing ? 'exact' : 'equal');
+  // A personal expense being added to a group has no split yet, so it starts equal between everyone.
+  const moving = !!editing && !editing.groupId;
+  const [mode, setMode] = useState<Mode>(editing && !moving ? 'exact' : 'equal');
   const [on, setOn] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(members.map((id) => [id, editing ? !!editing.shares?.[id] : true])),
+    Object.fromEntries(members.map((id) => [id, editing && !moving ? !!editing.shares?.[id] : true])),
   );
   const [exact, setExact] = useState<Record<string, string>>(() =>
     editing?.shares ? Object.fromEntries(Object.entries(editing.shares).map(([k, v]) => [k, String(v)])) : {},
@@ -74,8 +77,8 @@ export default function Split() {
     if (!ok) return;
     buzz('done');
     if (editing) {
-      store.updateExpense({ ...editing, merchant: desc.trim() || editing.merchant, amount, tag, payerId: payer, shares, reflect });
-      store.flash('Split updated');
+      store.updateExpense({ ...editing, merchant: desc.trim() || editing.merchant, amount, tag, groupId: group.id, payerId: payer, shares, reflect });
+      store.flash(moving ? `Added to ${group.name}` : 'Split updated');
     } else if (draft) {
       store.confirmDraft(draft.id, { tag, groupId: group.id, reflect, shares, payerId: payer });
       store.flash('Split saved');
@@ -103,21 +106,22 @@ export default function Split() {
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
       <Back />
       <Word size={28}>{group.name}</Word>
-      {!editing && !draft && real.length > 1 ? (
+      {(!editing || moving) && !draft && real.length > 1 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 12 }}>
           {real.map((g) => (
             <Chip key={g.id} label={g.name} on={g.id === group.id} onPress={() => router.setParams({ groupId: g.id })} />
           ))}
         </ScrollView>
       ) : null}
-      <TextInput value={desc} onChangeText={setDesc} placeholder="What was it for?" placeholderTextColor={c.mut} style={{ marginTop: 16, fontFamily: font.medium, fontSize: 18, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
+      <Input value={desc} onChangeText={setDesc} placeholder="What was it for?" label="What was it for?" caps="sentences" style={{ marginTop: 16, fontFamily: font.medium, fontSize: 18, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
         <Text style={{ fontFamily: font.display, fontSize: 30, color: c.mut }}>₹</Text>
-        <TextInput
+        <Input
           value={amt}
           onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))}
           editable={!draft}
-          keyboardType="decimal-pad"
+          mode="decimal"
+          label="Amount"
           placeholder="0"
           placeholderTextColor={c.bar}
           style={{ flex: 1, fontFamily: font.display, fontSize: 48, color: c.fg, padding: 0 }}
@@ -144,11 +148,11 @@ export default function Split() {
               <Text style={{ flex: 1, fontFamily: font.medium, color: isOn(id) ? c.fg : c.mut }}>{name(id)}</Text>
             </Press>
             {mode === 'exact' && isOn(id) ? (
-              <TextInput value={exact[id] ?? ''} onChangeText={(v) => setExact((s) => ({ ...s, [id]: v.replace(/[^0-9.]/g, '') }))} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.mut} style={{ width: 90, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+              <Input value={exact[id] ?? ''} onChangeText={(v) => setExact((s) => ({ ...s, [id]: v.replace(/[^0-9.]/g, '') }))} mode="decimal" label={`${name(id)}'s share`} placeholder="0" style={{ width: 90, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
             ) : mode === 'percent' && isOn(id) ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>₹{inr(shares[id] || 0)}</Text>
-                <TextInput value={pct[id] ?? String(pctOf(id))} onChangeText={(v) => setPct((s) => ({ ...s, [id]: v.replace(/[^0-9.]/g, '') }))} keyboardType="decimal-pad" style={{ width: 54, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+                <Input value={pct[id] ?? String(pctOf(id))} onChangeText={(v) => setPct((s) => ({ ...s, [id]: v.replace(/[^0-9.]/g, '') }))} mode="decimal" label={`${name(id)}'s percent`} style={{ width: 54, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
                 <Text style={{ fontFamily: font.displaySm, color: c.mut }}>%</Text>
               </View>
             ) : (
@@ -165,7 +169,7 @@ export default function Split() {
         </View>
         <Text style={{ fontFamily: font.body, color: c.fg, flex: 1 }}>Reflect my share in personal expenses</Text>
       </Press>
-      <Button label={editing ? 'Save changes' : `Save to ${group.name}`} onPress={save} disabled={!ok} />
+      <Button label={editing && !moving ? 'Save changes' : `Save to ${group.name}`} onPress={save} disabled={!ok} />
     </ScrollView>
   );
 }

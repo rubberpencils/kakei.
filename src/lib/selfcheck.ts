@@ -1,5 +1,6 @@
+import { applyKey, pasteInto, shouldCap } from './keyboard-logic';
 import { parseSms } from './parser';
-import { cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn } from './ledger';
+import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
 
@@ -90,6 +91,26 @@ eq(friendsOnly.total, 0, 'a bill paid fully for friends is not your spend');
 eq(friendsOnly.back, 100, 'all of it is coming back');
 eq(spendIn([{ ...cab, reflect: false }], [], 'me', '2026-10-01', '2026-10-31').back, 0, 'hidden splits stay out of personal');
 
+const tripGroup = { id: 'g', name: 'Trip', icon: 'beach', memberIds: ['b'], note: '' };
+const owedBalances = youBalances([cab], [], [tripGroup], 'me');
+eq(owedBalances.owedTotal, 50, 'balances: what friends owe you');
+eq(owedBalances.owed[0].id, 'b', 'balances: names the person who owes you');
+eq(owedBalances.owed[0].lines[0].groupId, 'g', 'balances: names the group it comes from');
+eq(owedBalances.oweTotal, 0, 'balances: nothing owed by you');
+const oweBalances = youBalances([theirs], [], [tripGroup], 'me');
+eq(oweBalances.oweTotal, 40, 'balances: what you owe');
+eq(oweBalances.owe[0].id, 'b', 'balances: names who you owe');
+
+const swipe1: Expense = { ...lunch, id: 'c1', rail: 'credit', amount: 780, account: '9012', bank: 'ICICI', at: '2026-10-01T12:00:00' };
+const swipe2: Expense = { ...swipe1, id: 'c2', amount: 2799, at: '2026-10-02T12:00:00' };
+const cardPay: Expense = { ...lunch, id: 'pay', transfer: true, rail: 'upi', amount: 1000, account: '3308', bank: 'HDFC', at: '2026-10-05T12:00:00' };
+eq(cardBills([swipe1, swipe2], 'me')[0].due, 3579, 'card bill adds up credit card spend by itself');
+eq(cardBills([swipe1, swipe2, cardPay], 'me')[0].due, 2579, 'a card bill payment takes it down');
+eq(cardBills([swipe1, swipe2, { ...cardPay, amount: 3579 }], 'me').length, 0, 'a paid card has no bill');
+eq(cardBills([{ ...cab, id: 'fc', rail: 'credit', payerId: 'b', amount: 500 }], 'me').length, 0, 'a friend\'s card is not your bill');
+eq(cardBills([{ ...cab, id: 'mc', rail: 'credit' }], 'me')[0].due, 100, 'a split you paid by card is the full charge on your card');
+eq(cardBills([lunch], 'me').length, 0, 'cash and UPI are not on a card bill');
+
 const mcpData: McpData = {
   you: { id: 'me', name: 'Me', initials: 'ME' },
   people: [{ id: 'b', name: 'Bela', initials: 'BE' }],
@@ -118,5 +139,30 @@ eq(asked('get_balances').balances[0].net, -20, 'mcp balances read from your side
 eq(asked('get_balances').balances[0].meaning, 'you owe them', 'mcp balances say who pays whom');
 eq(JSON.parse(rpc('tools/call', { name: 'get_summary', arguments: { month: 'oct' } }).body).result.isError, true, 'mcp bad input is a tool error');
 eq(JSON.stringify(JSON.parse(rpc('tools/call', { name: 'list_transactions' }).body)).includes('4521'), false, 'mcp never includes account numbers');
+
+// The in-app keyboard: what each key does to the text.
+const typed = (field: Parameters<typeof applyKey>[0], keys: string) => Array.from(keys).reduce((v, k) => applyKey(field, v, k), '');
+const money = { mode: 'decimal' as const };
+eq(typed(money, '12.509'), '12.50', 'amount stops at two decimals');
+eq(typed(money, '.5'), '0.5', 'a lone dot becomes 0.');
+eq(typed(money, '1.2.3'), '1.23', 'amount takes one dot');
+eq(typed(money, '007'), '7', 'amount drops leading zeros');
+eq(typed(money, 'a1b2'), '12', 'amount ignores letters');
+eq(applyKey(money, '1234567890', '1'), '1234567890', 'amount has a length limit');
+eq(applyKey(money, '12', 'del'), '1', 'delete removes the last digit');
+eq(typed({ mode: 'phone' }, '+91 98a76'), '+919876', 'phone keeps digits and a leading plus');
+eq(typed({ mode: 'number' }, '1.5'), '15', 'whole numbers have no dot');
+eq(typed({ mode: 'text', maxLength: 3 }, 'abcd'), 'abc', 'maxLength is respected');
+eq(applyKey({ mode: 'text', multiline: true }, 'a', 'enter'), 'a\n', 'multiline enter adds a line');
+eq(applyKey({ mode: 'text' }, 'a', 'enter'), 'a', 'single line enter adds nothing');
+eq(shouldCap('words', ''), true, 'words start with a capital');
+eq(shouldCap('words', 'Goa '), true, 'each word gets a capital');
+eq(shouldCap('words', 'Goa'), false, 'mid word stays lower case');
+eq(shouldCap('sentences', 'Hi. '), true, 'sentences restart after a full stop');
+eq(shouldCap('sentences', 'Hi'), false, 'sentences do not restart mid way');
+eq(shouldCap('none', ''), false, 'caps can be off');
+eq(shouldCap('chars', 'AB'), true, 'codes are all capitals');
+eq(pasteInto(money, '', ' ₹1,250.75 '), '1250.75', 'pasting into an amount keeps only the number');
+eq(pasteInto({ mode: 'text' }, 'a', ' b\n c '), 'ab c', 'pasting collapses whitespace on one line');
 
 console.log('selfcheck ok');

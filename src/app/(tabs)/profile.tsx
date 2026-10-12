@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Platform, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, ScrollView, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
 import { accountsFrom } from '@/lib/ledger';
 import { readDeviceSms } from '@/lib/sms';
@@ -51,7 +52,7 @@ export default function Profile() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 20 }}>
         <Avatar id={store.you.id} label={store.you.initials} size={64} you />
         <View style={{ flex: 1 }}>
-          <TextInput value={name} onChangeText={setName} onEndEditing={() => store.setName(name)} onBlur={() => store.setName(name)} style={{ fontFamily: font.semi, fontSize: 19, color: c.fg, padding: 0 }} />
+          <Input value={name} onChangeText={setName} onBlur={() => store.setName(name)} label="Your name" caps="words" style={{ fontFamily: font.semi, fontSize: 19, color: c.fg, padding: 0 }} />
           <Text style={{ fontFamily: font.mono, fontSize: 12.5, color: c.mut, marginTop: 4 }}>{store.signedIn ? store.phone : 'On this phone only'}</Text>
         </View>
       </View>
@@ -68,6 +69,11 @@ export default function Profile() {
       <Press onPress={scan}>
         <Row icon="refresh" title="Scan inbox now" />
       </Press>
+      {accounts.length ? null : (
+        <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, lineHeight: 18, marginTop: 4 }}>
+          Accounts and cards appear here by themselves. Kakei reads the bank name and last four digits from each bank SMS you confirm.
+        </Text>
+      )}
       {accounts.map((a) => (
         <Row key={`${a.bank}${a.account}`} icon={a.credit ? 'credit-card-outline' : 'bank-outline'} title={`${a.bank} ••${a.account}`} sub={a.credit ? 'Card' : 'Account'}>
           <Text style={{ fontFamily: font.mono, color: c.mut, fontSize: 13 }}>{a.count}</Text>
@@ -77,13 +83,12 @@ export default function Profile() {
       <Label>Budget</Label>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}>
         <Text style={{ fontFamily: font.display, fontSize: 22, color: c.mut }}>₹</Text>
-        <TextInput
+        <Input
           value={budget}
           onChangeText={(v) => setBudget(v.replace(/[^0-9]/g, ''))}
-          keyboardType="number-pad"
+          mode="number"
+          label="Monthly budget"
           placeholder="60000"
-          placeholderTextColor={c.mut}
-          onEndEditing={() => store.setBudget(Number(budget) || 0)}
           onBlur={() => store.setBudget(Number(budget) || 0)}
           style={{ flex: 1, fontFamily: font.displaySm, fontSize: 28, color: c.fg, padding: 0 }}
         />

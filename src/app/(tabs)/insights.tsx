@@ -1,8 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { ScrollView, Text, TextInput, View, type ViewStyle } from 'react-native';
+import { ScrollView, Text, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 
+import { Input } from '@/components/input';
 import { Press, Section, Segmented, SettleRow, TxnRow, Word, useDark, usePalette } from '@/components/ui';
 import { dayKey, inr, monthName, pad } from '@/lib/format';
 import { cashFlow, monthBounds, personName } from '@/lib/ledger';
@@ -397,7 +398,7 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
   return (
     <View style={{ flex: 1 }}>
       <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>{label}</Text>
-      <TextInput value={value} onChangeText={onChange} autoCapitalize="none" style={{ fontFamily: font.mono, fontSize: 13, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 6 }} />
+      <Input value={value} onChangeText={onChange} label={label} caps="none" style={{ fontFamily: font.mono, fontSize: 13, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 6 }} />
     </View>
   );
 }

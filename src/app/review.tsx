@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeInRight, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Back, buzz, Icon, Press, TagPicker, Toggle, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { useStore } from '@/lib/store';
@@ -60,7 +61,7 @@ export default function Review() {
           </View>
           <Word size={28} style={{ marginTop: 22 }}>All caught up</Word>
           <Text style={{ fontFamily: font.body, color: c.mut, textAlign: 'center', marginTop: 8, lineHeight: 21 }}>New messages will appear here as they arrive.</Text>
-          <TextInput value={paste} onChangeText={setPaste} placeholder="Paste a bank SMS" placeholderTextColor={c.mut} multiline style={{ marginTop: 24, width: '100%', minHeight: 80, borderRadius: 14, backgroundColor: c.sub, padding: 12, color: c.fg, fontFamily: font.mono, fontSize: 12 }} />
+          <Input value={paste} onChangeText={setPaste} placeholder="Paste a bank SMS" label="Bank SMS" caps="none" multiline style={{ marginTop: 24, width: '100%', minHeight: 80, borderRadius: 14, backgroundColor: c.sub, padding: 12, color: c.fg, fontFamily: font.mono, fontSize: 12 }} />
           <Press onPress={() => { if (store.ingestText(paste)) { setPaste(''); store.flash('Parsed'); } else store.flash('That does not look like a bank debit or credit.'); }} style={{ marginTop: 12, height: 46, paddingHorizontal: 20, borderRadius: 23, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
             <Text style={{ fontFamily: font.medium, color: c.fg }}>Parse message</Text>
           </Press>

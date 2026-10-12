@@ -1,9 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { Text, View } from 'react-native';
 import Animated, { FadeInDown, useReducedMotion, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Avatar, Back, Button, buzz, goBack, Icon, Press, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { groupDebts, personName } from '@/lib/ledger';
@@ -98,7 +99,7 @@ export default function Settle() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 28 }}>
         <Text style={{ fontFamily: font.display, fontSize: 30, color: c.mut }}>₹</Text>
-        <TextInput value={amt} onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))} keyboardType="decimal-pad" style={{ fontFamily: font.display, fontSize: 56, color: c.fg, minWidth: 80, textAlign: 'center' }} />
+        <Input value={amt} onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))} mode="decimal" label="Amount paid" placeholder="0" style={{ fontFamily: font.display, fontSize: 56, color: c.fg, minWidth: 80, textAlign: 'center' }} />
       </View>
       {amount > 0 && amount < chosen.amount - 0.5 ? (
         <Text style={{ fontFamily: font.body, color: c.mut, textAlign: 'center' }}>Partial. ₹{inr(chosen.amount - amount)} stays open.</Text>
