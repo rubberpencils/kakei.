@@ -149,6 +149,8 @@ function remapYou(s: Local, to: string): Local {
   };
 }
 
+const isLocalHost = (url: string) => /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:|\/|$)/i.test(url);
+
 // Everything on the phone, as ops, so a new account starts with what you already have.
 function snapshotOps(s: Local): Op[] {
   const ops: Op[] = [];
@@ -290,7 +292,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     AsyncStorage.getItem(KEY)
       .then((raw) => {
-        if (raw) setS({ ...FRESH, ...(JSON.parse(raw) as Partial<Local>) });
+        if (!raw) return;
+        const saved = { ...FRESH, ...(JSON.parse(raw) as Partial<Local>) };
+        // An older build saved localhost as the server. Without an account there, move to the real server.
+        if (!saved.token && isLocalHost(saved.base) && !isLocalHost(DEFAULT_API)) saved.base = DEFAULT_API;
+        setS(saved);
       })
       .catch(() => {})
       .finally(() => setReady(true));

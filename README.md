@@ -51,7 +51,7 @@ Then:
 npx eas-cli@latest build --platform android --profile preview
 ```
 
-That profile (`eas.json`) makes an installable APK and bakes in `EXPO_PUBLIC_API_URL`. It is currently `http://10.107.5.250:4000`. Phone and PC must be on the same Wi-Fi.
+That profile (`eas.json`) makes an installable APK and bakes in `EXPO_PUBLIC_API_URL`. It is currently the Coolify server, `https://kakei.169.58.42.62.sslip.io`, so the phone only needs internet.
 
 When the build page says finished, open it on the phone and install the APK.
 

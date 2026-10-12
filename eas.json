@@ -6,7 +6,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://10.107.5.250:4000"
+        "EXPO_PUBLIC_API_URL": "https://kakei.169.58.42.62.sslip.io"
       },
       "android": {
         "buildType": "apk"
