@@ -154,7 +154,7 @@ function NumPad({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
         <View key={i} style={{ flexDirection: 'row', gap: 8, height: NUM_ROW }}>
           {row.map((k, j) =>
             k === '' ? (
-              <View key={j} style={{ flex: 1 }} />
+              <View key={`gap-${j}`} style={{ flex: 1 }} />
             ) : (
               <Key key={k} pal={pal} big tone={k === 'del' ? 'fn' : 'key'} icon={k === 'del' ? 'backspace-outline' : undefined} label={k === 'del' ? undefined : k} repeat={k === 'del'} onKey={() => typeKey(k)} />
             ),
@@ -266,7 +266,7 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
     tick();
     latest.current();
   };
-  const bg = tone === 'primary' ? pal.acc : tone === 'fn' ? pal.bar : pal.sub;
+  // Flat keys, no tiles: the same plain look as the number pad on the Add screen. Only the action key is filled.
   const fg = tone === 'primary' ? pal.accFg : pal.fg;
 
   return (
@@ -290,19 +290,16 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
       }}
       style={({ pressed }) => ({
         flex,
-        borderRadius: big ? 16 : 11,
-        backgroundColor: pressed ? (tone === 'primary' ? pal.fg : pal.line) : bg,
-        borderWidth: tone === 'key' ? StyleSheet.hairlineWidth : 0,
-        borderColor: pal.line,
+        borderRadius: big ? 16 : 12,
+        backgroundColor: tone === 'primary' ? (pressed ? pal.fg : pal.acc) : pressed ? pal.sub : 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
-        transform: [{ scale: pressed ? 0.95 : 1 }],
       })}
     >
       {icon ? (
-        <MaterialCommunityIcons name={icon as never} size={big ? 24 : 21} color={fg} />
+        <MaterialCommunityIcons name={icon as never} size={big ? 24 : 22} color={fg} />
       ) : (
-        <Text style={{ fontFamily: big ? font.displaySm : font.medium, fontSize: big ? 26 : small ? 14 : 20, color: fg }}>{label}</Text>
+        <Text style={{ fontFamily: small ? font.medium : font.displaySm, fontSize: big ? 24 : small ? 14 : 21, color: fg }}>{label}</Text>
       )}
     </Pressable>
   );
