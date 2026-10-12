@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '@/components/input';
 import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
+import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
@@ -98,7 +99,7 @@ export default function Profile() {
       <Label>Sync and sharing</Label>
       {store.signedIn ? (
         <>
-          <Row icon="server-network" title={store.base.replace(/^https?:\/\//, '')} sub={syncLine}>
+          <Row icon="server-network" title={serverName(store.base)} sub={syncLine}>
             <Press onPress={store.syncNow} style={{ height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
               <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 12.5 }}>Sync now</Text>
             </Press>

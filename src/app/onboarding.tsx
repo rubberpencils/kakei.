@@ -14,6 +14,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Back, Body, Button, buzz, Field, Ghost, Icon, Press, Word, Wordmark, useDark, usePalette } from '@/components/ui';
+import { DEFAULT_API, isOfficial, serverName } from '@/lib/api';
 import { inr } from '@/lib/format';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
@@ -226,7 +227,8 @@ function Account({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editServer, setEditServer] = useState(false);
-  const [server, setServer] = useState(store.base);
+  // The box starts empty so nobody has to read or edit the official address. Empty means the official servers.
+  const [server, setServer] = useState(isOfficial(store.base) ? '' : store.base.replace(/^https?:\/\//, ''));
   const [serverError, setServerError] = useState<string | null>(null);
 
   const submit = async () => {
@@ -251,7 +253,7 @@ function Account({
 
   const saveServer = async () => {
     setServerError(null);
-    const err = await store.setBase(server);
+    const err = await store.setBase(server.trim() ? server : DEFAULT_API);
     if (err) setServerError(err);
     else setEditServer(false);
   };
@@ -277,15 +279,21 @@ function Account({
       <Animated.View entering={rise(2)} style={{ marginTop: 20 }}>
         {editServer ? (
           <View style={{ gap: 10 }}>
-            <Field label="Server address" value={server} onChange={setServer} placeholder="http://192.168.1.20:4000" keyboard="url" error={serverError} />
-            <Press onPress={saveServer} style={{ alignSelf: 'flex-start', height: 40, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
-              <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 13 }}>Test and use</Text>
-            </Press>
+            <Field label="Your own server" value={server} onChange={setServer} placeholder="localhost:4000" keyboard="url" error={serverError} />
+            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, lineHeight: 17 }}>Leave it empty to use the official servers.</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <Press onPress={saveServer} style={{ height: 40, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 13 }}>{server.trim() ? 'Test and use' : 'Use official servers'}</Text>
+              </Press>
+              <Press onPress={() => { setServerError(null); setEditServer(false); }} style={{ height: 40, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.medium, color: c.mut, fontSize: 13 }}>Cancel</Text>
+              </Press>
+            </View>
           </View>
         ) : (
           <Press onPress={() => setEditServer(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Icon name="server-network" size={16} color={c.mut} />
-            <Text style={{ fontFamily: font.mono, fontSize: 12, color: c.mut, flex: 1 }} numberOfLines={1}>{store.base.replace(/^https?:\/\//, '')}</Text>
+            <Text style={{ fontFamily: isOfficial(store.base) ? font.medium : font.mono, fontSize: 12.5, color: c.mut, flex: 1 }} numberOfLines={1}>{serverName(store.base)}</Text>
             <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.fg }}>Change</Text>
           </Press>
         )}

@@ -43,6 +43,16 @@ export function cleanBase(raw: string) {
   return /^https?:\/\//.test(t) ? t : `http://${t}`;
 }
 
+/** True when the app is pointed at the hosted Kakei server rather than one someone typed in. */
+export function isOfficial(base: string) {
+  return cleanBase(base).toLowerCase() === cleanBase(DEFAULT_API).toLowerCase();
+}
+
+/** What to call a server on screen. The hosted one is just "Official servers", with no address to read out. */
+export function serverName(base: string) {
+  return isOfficial(base) ? 'Official servers' : base.replace(/^https?:\/\//, '');
+}
+
 export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
