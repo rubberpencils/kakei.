@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kakei.",
     "slug": "kakei",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kakei",
@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "app.kakie",
+      "versionCode": 2,
       "allowBackup": false,
       "permissions": [
         "READ_SMS",
