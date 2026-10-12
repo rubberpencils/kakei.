@@ -1,27 +1,9 @@
 # kakei.
 
-A phone ledger that turns bank SMS into spends, then splits them with friends. Your money stays on your phone. A small server only passes shared groups between phones.
+A privacy focused expense ledger that turns bank SMS into spends, then splits them with friends. Your money stays on your phone.
 
-<p align="center">
-  <img src="docs/screenshots/05-home.png" width="220" alt="Home" />
-  <img src="docs/screenshots/09-add.png" width="220" alt="Add an expense with Kakei's own keyboard" />
-  <img src="docs/screenshots/10-group.png" width="220" alt="A group with one running balance" />
-</p>
 
 ## Screenshots
-
-### First run
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/01-welcome.png" width="200" alt="Welcome" /><br /><sub>Welcome</sub></td>
-    <td align="center"><img src="docs/screenshots/02-sms.png" width="200" alt="Connect bank SMS" /><br /><sub>Connect bank SMS</sub></td>
-    <td align="center"><img src="docs/screenshots/03-budget.png" width="200" alt="Monthly budget" /><br /><sub>Monthly budget</sub></td>
-    <td align="center"><img src="docs/screenshots/04-account.png" width="200" alt="Optional account" /><br /><sub>Optional account</sub></td>
-  </tr>
-</table>
-
-### Everyday use
 
 <table>
   <tr>
