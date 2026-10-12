@@ -1,7 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useId, useRef } from 'react';
 import { Pressable, StyleSheet, Text, useColorScheme, View, type GestureResponderEvent, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
-import Animated, { cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 
 import {
   blurField,
@@ -151,11 +151,11 @@ export function Input(props: InputProps) {
       ) : (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: justify }}>
           <View ref={rowRef} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
-            {focused && !value ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
+            {focused && !value ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} activity={`${glyphs.length}:${cursor}`} /> : null}
             {value ? (
               <>
                 {before ? <Text numberOfLines={1} ellipsizeMode="head" style={[text, { flexShrink: 1, color: textColor }]}>{before}</Text> : null}
-                {focused ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
+                {focused ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} activity={`${glyphs.length}:${cursor}`} /> : null}
                 {after ? <Text numberOfLines={1} style={[text, { flexShrink: 1, color: textColor }]}>{after}</Text> : null}
               </>
             ) : (
@@ -168,14 +168,24 @@ export function Input(props: InputProps) {
   );
 }
 
-function Caret({ height, color }: { height: number; color: string }) {
+// `activity` changes on every keystroke or caret move. The caret stops blinking while you type, and gives a small
+// springy stretch so each letter has a felt landing.
+function Caret({ height, color, activity }: { height: number; color: string; activity: string }) {
   const reduce = useReducedMotion();
   const o = useSharedValue(1);
+  const s = useSharedValue(1);
   useEffect(() => {
     if (reduce) return;
-    o.value = withRepeat(withSequence(withDelay(520, withTiming(0, { duration: 90 })), withDelay(520, withTiming(1, { duration: 90 }))), -1);
+    cancelAnimation(o);
+    o.value = 1;
+    o.value = withDelay(520, withRepeat(withSequence(withTiming(0, { duration: 90 }), withDelay(520, withTiming(1, { duration: 90 })), withDelay(520, withTiming(1, { duration: 0 }))), -1));
     return () => cancelAnimation(o);
-  }, [reduce, o]);
-  const anim = useAnimatedStyle(() => ({ opacity: o.value }));
+  }, [reduce, o, activity]);
+  useEffect(() => {
+    if (reduce) return;
+    s.value = 0.72;
+    s.value = withSpring(1, { duration: 220, dampingRatio: 0.7 });
+  }, [reduce, s, activity]);
+  const anim = useAnimatedStyle(() => ({ opacity: o.value, transform: [{ scaleY: s.value }] }));
   return <Animated.View style={[{ width: 2, height, borderRadius: 1, backgroundColor: color, marginHorizontal: 1 }, anim]} />;
 }

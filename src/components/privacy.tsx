@@ -14,13 +14,13 @@ const POINTS = [
 export function PrivacyNote() {
   const c = usePalette();
   return (
-    <View style={{ gap: 16 }}>
+    <View style={{ gap: 12 }}>
       {POINTS.map((p) => (
-        <View key={p.title} style={{ flexDirection: 'row', gap: 14 }}>
-          <Icon name={p.icon} size={20} color={c.brand} />
+        <View key={p.title} style={{ flexDirection: 'row', gap: 10 }}>
+          <Icon name={p.icon} size={16} color={c.mut} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: font.medium, fontSize: 14.5, color: c.fg }}>{p.title}</Text>
-            <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 2, lineHeight: 18 }}>{p.body}</Text>
+            <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: c.mut, lineHeight: 17 }}>{p.title}</Text>
+            <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 1, lineHeight: 17 }}>{p.body}</Text>
           </View>
         </View>
       ))}

@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { blurField, moveCursor, pasteText, submitField, typeKey, useKeyboard, type KeyField } from '@/lib/keyboard';
@@ -36,11 +36,23 @@ export function KeyboardHost() {
   const reduce = useReducedMotion();
   const cfg = field ?? last;
   const target = cfg ? keyboardHeight(cfg.mode, insets.bottom) : 0;
-  const h = useSharedValue(0);
+  const open = !!field;
+  // How far the keys are pushed below the screen. Only a transform is animated: the layout height below is plain state,
+  // because animating a layout height every frame could leave the screens above stuck at the wrong size.
+  const y = useSharedValue(2000);
+  const wasOpen = useRef(false);
 
   useEffect(() => {
-    h.value = withTiming(field ? target : 0, { duration: reduce ? 0 : 280, easing: Easing.bezier(0.32, 0.72, 0, 1) });
-  }, [field, target, reduce, h]);
+    // Critically damped, so it settles without bounce. It starts from where it is, so it can be reversed mid-slide.
+    const spring = { duration: reduce ? 1 : 360, dampingRatio: 1, overshootClamping: true };
+    if (open) {
+      if (!wasOpen.current) y.value = target;
+      y.value = withSpring(0, spring);
+    } else {
+      y.value = withSpring(target, spring);
+    }
+    wasOpen.current = open;
+  }, [open, target, reduce, y]);
 
   // Back closes the keyboard first, and only then leaves the screen.
   useEffect(() => {
@@ -52,23 +64,25 @@ export function KeyboardHost() {
     return () => sub.remove();
   }, [field]);
 
-  const anim = useAnimatedStyle(() => ({ height: h.value }));
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
   if (!cfg) return null;
 
+  // While open the screens above are exactly `target` shorter. Once closed the box is flat, and the keys slide down over
+  // the screen as it grows back.
   return (
-    <Animated.View
-      style={[
-        { overflow: 'hidden', backgroundColor: pal.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: pal.line, pointerEvents: field ? 'auto' : 'none' },
-        anim,
-      ]}
-    >
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: target, paddingHorizontal: 6 }}>
+    <View style={{ height: open ? target : 0, overflow: open ? 'hidden' : 'visible', zIndex: 20, pointerEvents: open ? 'auto' : 'none' }}>
+      <Animated.View
+        style={[
+          { position: 'absolute', left: 0, right: 0, bottom: 0, height: target, paddingHorizontal: 6, backgroundColor: pal.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: pal.line },
+          slide,
+        ]}
+      >
         <Toolbar cfg={cfg} pal={pal} />
         <View style={{ flex: 1, gap: VGAP, paddingTop: PAD, paddingBottom: PAD + Math.max(insets.bottom, 6) }}>
           <Keys key={`${cfg.id}:${cfg.mode}`} cfg={cfg} pal={pal} />
         </View>
-      </View>
-    </Animated.View>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -266,6 +280,15 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
     tick();
     latest.current();
   };
+  // The glyph dips under the finger the moment it lands and eases back on release. A critically damped spring, so a
+  // quick second tap simply restarts from wherever the glyph is.
+  const reduce = useReducedMotion();
+  const dip = useSharedValue(1);
+  const glyph = useAnimatedStyle(() => ({ transform: [{ scale: dip.value }] }));
+  const press = (down: boolean) => {
+    if (reduce) return;
+    dip.set(withSpring(down ? 0.82 : 1, { duration: down ? 140 : 260, dampingRatio: 1 }));
+  };
   // Flat keys, no tiles: the same plain look as the number pad on the Add screen. Only the action key is filled.
   const fg = tone === 'primary' ? pal.accFg : pal.fg;
 
@@ -274,6 +297,7 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
       accessibilityLabel={label}
       onPressIn={() => {
         fired.current = true;
+        press(true);
         fire();
         if (repeat) {
           stop();
@@ -282,7 +306,10 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
           }, 380);
         }
       }}
-      onPressOut={stop}
+      onPressOut={() => {
+        press(false);
+        stop();
+      }}
       onPress={() => {
         // Screen readers activate without a touch-down, so they still get the key.
         if (!fired.current) fire();
@@ -296,11 +323,13 @@ function Key({ pal, label, icon, flex = 1, tone = 'key', big, small, repeat, onK
         justifyContent: 'center',
       })}
     >
-      {icon ? (
-        <MaterialCommunityIcons name={icon as never} size={big ? 24 : 22} color={fg} />
-      ) : (
-        <Text style={{ fontFamily: small ? font.medium : font.displaySm, fontSize: big ? 24 : small ? 14 : 21, color: fg }}>{label}</Text>
-      )}
+      <Animated.View style={glyph}>
+        {icon ? (
+          <MaterialCommunityIcons name={icon as never} size={big ? 24 : 22} color={fg} />
+        ) : (
+          <Text style={{ fontFamily: small ? font.medium : font.displaySm, fontSize: big ? 24 : small ? 14 : 21, color: fg }}>{label}</Text>
+        )}
+      </Animated.View>
     </Pressable>
   );
 }

@@ -160,5 +160,5 @@ function Row({ icon, title, sub, children }: { icon: string; title: string; sub?
 
 function Label({ children }: { children: string }) {
   const c = usePalette();
-  return <Text style={{ marginTop: 32, marginBottom: 6, fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>{children.toUpperCase()}</Text>;
+  return <Text style={{ marginTop: 32, marginBottom: 12, fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>{children.toUpperCase()}</Text>;
 }
