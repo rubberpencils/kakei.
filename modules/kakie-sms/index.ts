@@ -35,8 +35,24 @@ export function mcpReply(id: string, status: number, body: string) {
   return native.mcpReply(id, status, body);
 }
 
-export function localAddresses() {
-  return native.localAddresses();
+/**
+ * Addresses of this phone. An app built before the interface labels existed returns bare strings.
+ * Those are still accepted, so a JS update never blanks the address. Without an interface name a
+ * 100.64.0.0/10 address could be a carrier's, so it is not trusted as Tailscale.
+ */
+export async function localAddresses(): Promise<LocalAddress[]> {
+  const raw: unknown = await native.localAddresses();
+  if (!Array.isArray(raw)) return [];
+  const out: LocalAddress[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const [a, b] = item.split('.').map(Number);
+      out.push({ ip: item, kind: a === 100 && b >= 64 && b <= 127 ? 'cellular' : 'lan', iface: '' });
+    } else if (item && typeof item.ip === 'string') {
+      out.push({ ip: item.ip, kind: item.kind === 'tailscale' || item.kind === 'cellular' ? item.kind : 'lan', iface: String(item.iface ?? '') });
+    }
+  }
+  return out;
 }
 
 /** True when Android will not put the app to sleep to save battery. */

@@ -1,4 +1,4 @@
-# kakie.
+# kakei.
 
 Phone ledger that turns bank SMS into spends, plus a small API so groups share the same balances.
 

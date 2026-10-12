@@ -187,7 +187,7 @@ export default function Home() {
               const n = youNet(groupDebts(store.expenses, store.settlements, g), store.you.id);
               const color = n.net > 0 ? c.pos : n.net < 0 ? c.neg : c.mut;
               return (
-                <Press key={g.id} onPress={() => router.push({ pathname: '/group/[id]', params: { id: g.id } })} style={{ width: 156, padding: 16, borderRadius: 20, backgroundColor: c.sub }}>
+                <Press key={g.id} onPress={() => router.push({ pathname: '/group/[id]', params: { id: g.id } })} style={{ width: 156, minHeight: GROUP_CARD_H, padding: 16, borderRadius: 20, backgroundColor: c.sub }}>
                   <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                     <Icon name={g.icon} size={20} />
                   </View>
@@ -198,7 +198,7 @@ export default function Home() {
                 </Press>
               );
             })}
-            <Press onPress={() => router.push('/new-group')} style={{ width: 90, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Press onPress={() => router.push('/new-group')} style={{ width: 90, minHeight: GROUP_CARD_H, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <Icon name="account-multiple-plus" size={24} color={c.mut} />
               <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, textAlign: 'center' }}>New{'\n'}group</Text>
             </Press>
@@ -215,6 +215,8 @@ export default function Home() {
 }
 
 const StyleSheetHair = StyleSheet.hairlineWidth;
+// Group cards and the New group tile share this height, so the tile looks the same with zero groups or many.
+const GROUP_CARD_H = 184;
 
 function Pill({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
   const c = usePalette();

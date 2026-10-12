@@ -124,7 +124,7 @@ export default function Onboarding() {
                 {ios ? (
                   <>
                     <StepRow i={2} reduce={reduce} n="01" title='New automation: Message contains "debited"' sub='Make two more for "credited" and "spent"' />
-                    <StepRow i={3} reduce={reduce} n="02" title="Action: Open URL kakie://sms?text=" sub="Append the Shortcut Input message to the URL" />
+                    <StepRow i={3} reduce={reduce} n="02" title="Action: Open URL kakei://sms?text=" sub="Append the Shortcut Input message to the URL" />
                     <StepRow i={4} reduce={reduce} n="03" title="Turn on Run Immediately" sub="Kakei. parses it here. You confirm before it is saved." />
                   </>
                 ) : (

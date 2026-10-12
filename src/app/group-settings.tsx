@@ -41,7 +41,7 @@ export default function GroupSettings() {
   };
   const share = () => {
     if (!group.code) return store.flash(store.signedIn ? 'The code appears once the group reaches the server' : 'Turn on sync in Profile to invite friends');
-    Share.share({ message: `Join "${group.name}" on Kakei. with code ${group.code}\nkakie://join?code=${group.code}` });
+    Share.share({ message: `Join "${group.name}" on Kakei. with code ${group.code}\nkakei://join?code=${group.code}` });
   };
   const remove = () => {
     const go = () => {

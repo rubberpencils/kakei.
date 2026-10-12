@@ -12,7 +12,7 @@ People in India who already get a bank SMS for every UPI, card, debit, or transf
 
 ## Product Purpose
 
-kakie. is a personal finance tracker and a group expense manager. Success means the user can see what they actually spent, what is still out of their pocket, and what other people still owe, including after each person in a split settles.
+kakei. is a personal finance tracker and a group expense manager. Success means the user can see what they actually spent, what is still out of their pocket, and what other people still owe, including after each person in a split settles.
 
 ## Positioning
 
@@ -20,9 +20,9 @@ Bank SMS is the intake. The user classifies each message once, with one tag, and
 
 ## Operating Context
 
-The phone is the ledger. Banks already text the transaction. Android can read the SMS inbox after permission. iOS cannot, so iOS intake is a Shortcuts automation that opens kakie. with the message. The user confirms every entry. Nothing is saved until they do.
+The phone is the ledger. Banks already text the transaction. Android can read the SMS inbox after permission. iOS cannot, so iOS intake is a Shortcuts automation that opens kakei. with the message. The user confirms every entry. Nothing is saved until they do.
 
-Other people have accounts and can join a group. There is no kakie. server and no central database. A group syncs by passing a signed-by-contents event payload (share or paste). Balances are computed from expenses and settlements, never stored as a balance table. Live always-on sync across phones is not in this version. The event payload is the transport until a relay exists.
+Other people have accounts and can join a group. There is no kakei. server and no central database. A group syncs by passing a signed-by-contents event payload (share or paste). Balances are computed from expenses and settlements, never stored as a balance table. Live always-on sync across phones is not in this version. The event payload is the transport until a relay exists.
 
 Currency is INR. The monthly budget is one number the user sets. Spend under that number is savings.
 
@@ -48,7 +48,7 @@ Undecided:
 
 ## Brand Commitments
 
-The name is kakie. with the full stop. The visual source is the prototype in `temp - Copy/project` (FinApp, kakie. screens). Display face Syne, body Plus Jakarta Sans, figures JetBrains Mono, because that prototype is the pinned design. Ink accent, warm gray ground, green for money in, red for money out. No extra containers or drop shadows. Hierarchy from type and hairlines.
+The name is kakei. with the full stop. The visual source is the prototype in `temp - Copy/project` (FinApp, kakei. screens). Display face Syne, body Plus Jakarta Sans, figures JetBrains Mono, because that prototype is the pinned design. Ink accent, warm gray ground, green for money in, red for money out. No extra containers or drop shadows. Hierarchy from type and hairlines.
 
 ## Evidence on Hand
 

@@ -151,7 +151,7 @@ export default function Developer() {
 
           <Text style={label(c.mut)}>Address</Text>
           <Text selectable style={{ fontFamily: font.mono, fontSize: 13, color: c.fg }}>{url}</Text>
-          {lan && status.addresses.length > 1 ? (
+          {lan && status.addresses.length > 0 ? (
             <View style={{ marginTop: 8, gap: 2 }}>
               {status.addresses.map((a) => (
                 <Text key={a.ip} selectable style={{ fontFamily: font.mono, fontSize: 12, color: c.mut }}>
@@ -161,7 +161,9 @@ export default function Developer() {
             </View>
           ) : null}
           {lan && !tailscale && status.listening ? (
-            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8, lineHeight: 18 }}>No Tailscale address found. Install Tailscale on the phone to reach it away from home.</Text>
+            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8, lineHeight: 18 }}>{host === '<phone-ip>'
+                ? 'No usable address. Connect the phone to Wi-Fi, or open Tailscale and connect it.'
+                : 'Tailscale is not connected on this phone. Connect it to reach this away from home. On the same Wi-Fi the address above works.'}</Text>
           ) : null}
 
           <Text style={label(c.mut)}>Token</Text>
