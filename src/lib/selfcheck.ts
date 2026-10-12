@@ -1,4 +1,5 @@
 import { sanitize } from './input-rules';
+import { inr } from './format';
 import { parseSms } from './parser';
 import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
@@ -159,4 +160,16 @@ eq(sanitize('number', '09'), '9', 'whole numbers drop leading zeros');
 eq(sanitize('text', 'abcd', 3), 'abc', 'maxLength is respected');
 eq(sanitize('url', 'Localhost:4000'), 'Localhost:4000', 'addresses pass through untouched');
 
+// Money is never rounded: paise show, and the last person in a split takes the odd paisa.
+eq(inr(1240), '1,240', 'whole rupees stay whole');
+eq(inr(1240.5), '1,240.50', 'paise show as two digits');
+eq(inr(33.33), '33.33', 'two decimals are kept');
+eq(inr(-0.3), '0.30', 'small amounts are not rounded away');
+const odd = equalShares(100, ['a', 'b', 'c']);
+eq([odd.a, odd.b, odd.c].join(' '), '33.33 33.33 33.34', 'the last person in a split takes the odd paisa');
+eq(Object.values(equalShares(10, ['a', 'b', 'c'])).reduce((a, b) => a + b, 0), 10, 'equal shares always add back up');
+eq(JSON.stringify(percentShares(100, { a: 33.33, b: 33.33, c: 33.34 })), JSON.stringify({ a: 33.33, b: 33.33, c: 33.34 }), 'percent shares keep paise');
+const dust: Expense = { id: 'x', merchant: 'Chai', amount: 10.3, at: '2026-09-19T12:00:00', tag: null, rail: 'upi', income: false, transfer: false, recurring: null, recurId: null, groupId: 'g1', payerId: 'a', shares: { a: 0, b: 10.3 }, reflect: true };
+eq(pairDebts([dust], [], 'g1')[0]?.amount, 10.3, 'a debt with paise is kept exactly');
+eq(pairDebts([dust], [{ id: 's9', groupId: 'g1', fromId: 'b', toId: 'a', amount: 10, at: '2026-09-20T12:00:00' }], 'g1')[0]?.amount, 0.3, 'a small balance left after a part payment stays open');
 console.log('selfcheck ok');

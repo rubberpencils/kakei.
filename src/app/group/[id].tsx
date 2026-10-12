@@ -216,8 +216,8 @@ export default function GroupScreen() {
                       <Avatar id={p.id} label={p.initials} you={p.id === you} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>{p.id === you ? 'You' : p.name}</Text>
-                        <Text style={{ fontFamily: font.body, fontSize: 12.5, color: v > 0.5 ? c.pos : v < -0.5 ? c.neg : c.mut, marginTop: 2 }}>
-                          {v > 0.5 ? `gets back ₹${inr(v)}` : v < -0.5 ? `owes ₹${inr(-v)}` : 'settled up'}
+                        <Text style={{ fontFamily: font.body, fontSize: 12.5, color: v > 0.005 ? c.pos : v < -0.005 ? c.neg : c.mut, marginTop: 2 }}>
+                          {v > 0.005 ? `gets back ₹${inr(v)}` : v < -0.005 ? `owes ₹${inr(-v)}` : 'settled up'}
                         </Text>
                       </View>
                       <Icon name="chevron-right" size={18} color={c.mut} />

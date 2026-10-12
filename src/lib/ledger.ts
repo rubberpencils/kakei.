@@ -47,8 +47,8 @@ export function pairDebts(expenses: Expense[], settlements: Settlement[], groupI
     seen.add(k);
     seen.add(revK);
     const net = round2(v - rev);
-    if (net > 0.5) out.push({ fromId: from, toId: to, amount: net });
-    else if (net < -0.5) out.push({ fromId: to, toId: from, amount: round2(-net) });
+    if (net > 0.005) out.push({ fromId: from, toId: to, amount: net });
+    else if (net < -0.005) out.push({ fromId: to, toId: from, amount: round2(-net) });
   }
   return out.sort((a, b) => b.amount - a.amount);
 }
@@ -59,18 +59,18 @@ export function simplify(debts: Debt[]): Debt[] {
     net.set(d.fromId, round2((net.get(d.fromId) || 0) - d.amount));
     net.set(d.toId, round2((net.get(d.toId) || 0) + d.amount));
   }
-  const cred = [...net.entries()].filter(([, v]) => v > 0.5).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
-  const deb = [...net.entries()].filter(([, v]) => v < -0.5).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const cred = [...net.entries()].filter(([, v]) => v > 0.005).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -0.005).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
   const out: Debt[] = [];
   let i = 0;
   let j = 0;
   while (i < cred.length && j < deb.length) {
     const amt = Math.min(cred[i].v, deb[j].v);
-    if (amt > 0.5) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    if (amt > 0.005) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
     cred[i].v -= amt;
     deb[j].v -= amt;
-    if (cred[i].v < 0.5) i += 1;
-    if (deb[j].v < 0.5) j += 1;
+    if (cred[i].v < 0.005) i += 1;
+    if (deb[j].v < 0.005) j += 1;
   }
   return out;
 }
@@ -210,7 +210,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
       if (!target) continue;
       target.due = round2(Math.max(0, target.due - e.amount));
       target.lastPaid = e.at;
-      if (target.due < 0.5) target.charges = [];
+      if (target.due < 0.005) target.charges = [];
       continue;
     }
     if (e.rail !== 'credit') continue;
@@ -220,7 +220,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
     c.due = round2(c.due + e.amount);
     c.charges.unshift(e);
   }
-  return [...cards.values()].filter((c) => c.due >= 0.5).sort((a, b) => b.due - a.due);
+  return [...cards.values()].filter((c) => c.due >= 0.005).sort((a, b) => b.due - a.due);
 }
 
 export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
@@ -245,7 +245,7 @@ export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
         const pay = Math.min(due, left);
         rem[e.id][s.fromId] = round2(due - pay);
         left = round2(left - pay);
-        if (left < 0.5) break;
+        if (left < 0.005) break;
       }
     }
   }

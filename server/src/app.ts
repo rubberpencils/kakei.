@@ -314,7 +314,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer }
             if (share > 0) shares[pid] = share;
             sum += share;
           }
-          if (!Object.keys(shares).length || Math.abs(sum - amount) > 1) fail(400, 'Split does not add up to the amount');
+          if (!Object.keys(shares).length || Math.abs(sum - amount) > 0.05) fail(400, 'Split does not add up to the amount');
         }
         if (!RAILS.has(e.rail)) fail(400, 'rail is invalid');
         const data = {

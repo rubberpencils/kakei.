@@ -104,7 +104,7 @@ export default function Groups() {
             })
           : friends.map((f) => {
               const p = store.people.find((x) => x.id === f.id);
-              const color = f.net > 0.5 ? c.pos : f.net < -0.5 ? c.neg : c.mut;
+              const color = f.net > 0.005 ? c.pos : f.net < -0.005 ? c.neg : c.mut;
               return (
                 <Press key={f.id} onPress={() => router.push({ pathname: '/person/[id]', params: { id: f.id } })} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 }}>
                   <Avatar id={f.id} label={p?.initials ?? '?'} size={42} />
@@ -115,8 +115,8 @@ export default function Groups() {
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ fontFamily: font.body, fontSize: 11.5, color }}>{f.net > 0.5 ? 'owes you' : f.net < -0.5 ? 'you owe' : 'settled up'}</Text>
-                    {Math.abs(f.net) > 0.5 ? <Text style={{ fontFamily: font.displaySm, fontSize: 16, color }}>₹{inr(Math.abs(f.net))}</Text> : null}
+                    <Text style={{ fontFamily: font.body, fontSize: 11.5, color }}>{f.net > 0.005 ? 'owes you' : f.net < -0.005 ? 'you owe' : 'settled up'}</Text>
+                    {Math.abs(f.net) > 0.005 ? <Text style={{ fontFamily: font.displaySm, fontSize: 16, color }}>₹{inr(Math.abs(f.net))}</Text> : null}
                   </View>
                 </Press>
               );

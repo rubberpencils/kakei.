@@ -4,15 +4,14 @@ const MONTHS = [
 ];
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/** An amount as people write it: whole rupees stay whole, and any paise show as two digits. Money is never rounded. */
 export function inr(n: number) {
-  return Math.round(Math.abs(n)).toLocaleString('en-IN');
-}
-
-/** Like `inr`, but keeps the paise when there are any. For amounts someone typed, where rounding would be wrong. */
-export function inrExact(n: number) {
   const v = Math.round(Math.abs(n) * 100) / 100;
   return v.toLocaleString('en-IN', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 });
 }
+
+/** Same as `inr`. Kept so older call sites read the same. */
+export const inrExact = inr;
 
 export function money(n: number, sign = false) {
   const body = `₹${inr(n)}`;

@@ -49,7 +49,7 @@ export default function QuickSplit() {
       : Object.fromEntries(included.map((id) => [id, Number(exact[id]) || 0]));
   const sum = Object.values(shares).reduce((a, b) => a + b, 0);
   const pctSum = included.reduce((a, id) => a + pctOf(id), 0);
-  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < 0.5 : Math.abs(pctSum - 100) < 0.5);
+  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < 0.005 : Math.abs(pctSum - 100) < 0.5);
   const ok = amount > 0 && picked.length > 0 && included.length > 0 && balanced && (fixed || desc.trim().length > 0);
   const status = !picked.length
     ? 'Pick at least one person'

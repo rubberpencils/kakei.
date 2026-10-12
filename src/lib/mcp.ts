@@ -186,7 +186,7 @@ function callTool(name: string, args: Record<string, unknown>, d: McpData) {
 
   if (name === 'get_balances') {
     const rows = friendBalances(d.expenses, d.settlements, d.groups, you)
-      .filter((f) => Math.abs(f.net) >= 0.5)
+      .filter((f) => Math.abs(f.net) >= 0.005)
       .map((f) => ({
         friend: personName(d.people, d.you, f.id),
         net: round2(f.net),

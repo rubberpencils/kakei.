@@ -36,7 +36,7 @@ export default function Home() {
       acc.owed += n.owed;
       acc.owe += n.owe;
       acc.owedPeople += debts.filter((d) => d.toId === store.you.id).length;
-      if (n.owe > 0.5) acc.oweGroups += 1;
+      if (n.owe > 0.005) acc.oweGroups += 1;
       return acc;
     },
     { owed: 0, owe: 0, owedPeople: 0, oweGroups: 0 },
@@ -110,7 +110,7 @@ export default function Home() {
             </View>
             {store.budget ? <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut }}>₹{inr(left)} left</Text> : null}
           </View>
-          {month.back > 0.5 ? (
+          {month.back > 0.005 ? (
             <Press onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.pos }} />
               <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: c.pos }}>₹{inr(month.back)} still to get back from friends</Text>
@@ -168,12 +168,12 @@ export default function Home() {
           <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
             <Press onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} style={{ flex: 1, padding: 16, borderRadius: 20, backgroundColor: c.sub }}>
               <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: c.mut }}>Owed to you</Text>
-              <Text style={{ fontFamily: font.displaySm, fontSize: 26, color: nets.owed > 0.5 ? c.pos : c.fg, marginTop: 6 }}>₹{inr(nets.owed)}</Text>
+              <Text style={{ fontFamily: font.displaySm, fontSize: 26, color: nets.owed > 0.005 ? c.pos : c.fg, marginTop: 6 }}>₹{inr(nets.owed)}</Text>
               <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 4 }}>{nets.owedPeople} {nets.owedPeople === 1 ? 'person' : 'people'}</Text>
             </Press>
             <Press onPress={() => router.push({ pathname: '/balances', params: { side: 'owe' } })} style={{ flex: 1, padding: 16, borderRadius: 20, backgroundColor: c.sub }}>
               <Text style={{ fontFamily: font.medium, fontSize: 12.5, color: c.mut }}>You owe</Text>
-              <Text style={{ fontFamily: font.displaySm, fontSize: 26, color: nets.owe > 0.5 ? c.neg : c.fg, marginTop: 6 }}>₹{inr(nets.owe)}</Text>
+              <Text style={{ fontFamily: font.displaySm, fontSize: 26, color: nets.owe > 0.005 ? c.neg : c.fg, marginTop: 6 }}>₹{inr(nets.owe)}</Text>
               <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 4 }}>{nets.oweGroups} {nets.oweGroups === 1 ? 'group' : 'groups'}</Text>
             </Press>
           </View>
@@ -194,8 +194,8 @@ export default function Home() {
                   </View>
                   <Text style={{ fontFamily: font.semi, fontSize: 15, color: c.fg }} numberOfLines={1}>{g.name}</Text>
                   <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 2 }}>{g.memberIds.length + 1} people</Text>
-                  <Text style={{ fontFamily: font.medium, fontSize: 12, color: c.mut, marginTop: 14 }}>{n.net > 0.5 ? 'Owed to you' : n.net < -0.5 ? 'You owe' : 'Settled up'}</Text>
-                  <Text style={{ fontFamily: font.displaySm, fontSize: 20, color, marginTop: 2 }}>{Math.abs(n.net) > 0.5 ? `₹${inr(Math.abs(n.net))}` : '₹0'}</Text>
+                  <Text style={{ fontFamily: font.medium, fontSize: 12, color: c.mut, marginTop: 14 }}>{n.net > 0.005 ? 'Owed to you' : n.net < -0.005 ? 'You owe' : 'Settled up'}</Text>
+                  <Text style={{ fontFamily: font.displaySm, fontSize: 20, color, marginTop: 2 }}>{Math.abs(n.net) > 0.005 ? `₹${inr(Math.abs(n.net))}` : '₹0'}</Text>
                 </Press>
               );
             })}

@@ -68,10 +68,10 @@ export default function PersonScreen() {
 
           {!isYou ? (
             <View style={{ marginTop: 22 }}>
-              <Text style={{ fontFamily: font.display, fontSize: 22, letterSpacing: -0.6, color: net > 0.5 ? c.pos : net < -0.5 ? c.neg : c.fg }}>
-                {net > 0.5 ? `${first} owes you ₹${inr(net)}` : net < -0.5 ? `You owe ${first} ₹${inr(-net)}` : 'All settled up'}
+              <Text style={{ fontFamily: font.display, fontSize: 22, letterSpacing: -0.6, color: net > 0.005 ? c.pos : net < -0.005 ? c.neg : c.fg }}>
+                {net > 0.005 ? `${first} owes you ₹${inr(net)}` : net < -0.005 ? `You owe ${first} ₹${inr(-net)}` : 'All settled up'}
               </Text>
-              {balance?.groups.filter((g) => Math.abs(g.net) > 0.5).map((g) => {
+              {balance?.groups.filter((g) => Math.abs(g.net) > 0.005).map((g) => {
                 const group = store.groups.find((x) => x.id === g.groupId);
                 if (!group) return null;
                 return (

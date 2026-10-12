@@ -80,8 +80,8 @@ export default function Personal() {
           <Word size={28}>Personal</Word>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 20, marginBottom: 12 }}>
             <Stat label="This month" value={inr(month.total)} color={c.fg} />
-            <Stat label="Owed back" value={inr(owed)} color={owed > 0.5 ? c.pos : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} />
-            <Stat label="You owe" value={inr(owe)} color={owe > 0.5 ? c.neg : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owe' } })} />
+            <Stat label="Owed back" value={inr(owed)} color={owed > 0.005 ? c.pos : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} />
+            <Stat label="You owe" value={inr(owe)} color={owe > 0.005 ? c.neg : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owe' } })} />
           </View>
           {cards.length ? (
             <Press onPress={() => router.push('/card-bill')} style={{ marginBottom: 12, padding: 14, borderRadius: 16, backgroundColor: c.sub, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
