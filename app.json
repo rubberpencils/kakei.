@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "app.kakie",
+      "allowBackup": false,
       "permissions": [
         "READ_SMS",
         "RECEIVE_SMS"

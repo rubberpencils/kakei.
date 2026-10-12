@@ -88,6 +88,9 @@ async function readBody(req: IncomingMessage): Promise<Row> {
   return obj(parsed, 'body');
 }
 
+// A stolen token stops working after this long. People sign in again.
+const SESSION_MS = 90 * 24 * 3600 * 1000;
+
 export function createApp(db: DatabaseSync, opts: { cors: string }) {
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
   const all = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).all(...args) as Row[];
@@ -116,6 +119,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
 
   const session = (user: User) => {
     const token = randomBytes(32).toString('base64url');
+    run('delete from sessions where created < ?', Date.now() - SESSION_MS);
     run('insert into sessions (token, user_id, created) values (?, ?, ?)', sha(token), user.id, Date.now());
     return { token, you: user };
   };
@@ -165,7 +169,11 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
     const header = req.headers.authorization ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     const row = token
-      ? one('select u.id, u.name, u.phone from sessions s join users u on u.id = s.user_id where s.token = ?', sha(token))
+      ? one(
+          'select u.id, u.name, u.phone from sessions s join users u on u.id = s.user_id where s.token = ? and s.created > ?',
+          sha(token),
+          Date.now() - SESSION_MS,
+        )
       : undefined;
     if (!row) fail(401, 'Sign in again');
     return { id: row.id, name: row.name, phone: row.phone };

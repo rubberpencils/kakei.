@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 
-export type McpStatus = { listening: boolean; port: number | null; error: string | null; served: number; addresses: string[] };
+import type { LocalAddress } from '../../modules/kakie-sms';
+
+export type McpStatus = { listening: boolean; port: number | null; error: string | null; served: number; addresses: LocalAddress[] };
 
 let state: McpStatus = { listening: false, port: null, error: null, served: 0, addresses: [] };
 const subs = new Set<() => void>();

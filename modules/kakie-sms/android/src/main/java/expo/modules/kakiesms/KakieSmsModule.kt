@@ -22,7 +22,9 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 private const val MAX_BODY = 1_000_000
@@ -32,7 +34,8 @@ private class McpReply(val status: Int, val body: String)
 class KakieSmsModule : Module() {
   private var mcpSocket: ServerSocket? = null
   private var mcpToken = ""
-  private val mcpPool = Executors.newFixedThreadPool(4)
+  // 4 workers and a short queue. Extra connections are dropped instead of piling up, so a flood cannot exhaust memory.
+  private val mcpPool = ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(8))
   private val waiting = ConcurrentHashMap<String, CompletableFuture<McpReply>>()
 
   override fun definition() = ModuleDefinition {
@@ -82,7 +85,11 @@ class KakieSmsModule : Module() {
       Thread {
         while (!socket.isClosed) {
           val client = try { socket.accept() } catch (_: Exception) { break }
-          mcpPool.execute { serve(client) }
+          try {
+            mcpPool.execute { serve(client) }
+          } catch (_: RejectedExecutionException) {
+            try { client.close() } catch (_: Exception) {}
+          }
         }
       }.apply { isDaemon = true; name = "kakei-mcp" }.start()
       socket.localPort
@@ -98,18 +105,30 @@ class KakieSmsModule : Module() {
     }
 
     AsyncFunction("localAddresses") {
-      val out = ArrayList<String>()
+      // Carriers hand mobile data out of the same 100.64.0.0/10 block Tailscale uses, so the range alone proves nothing.
+      // Tailscale lives on a VPN tunnel interface (tun0 / tailscale0). Mobile data is rmnet / ccmni / v4-*.
+      val out = ArrayList<Map<String, String>>()
       try {
         for (nic in NetworkInterface.getNetworkInterfaces()) {
           if (!nic.isUp || nic.isLoopback) continue
+          val name = nic.name.lowercase()
           for (addr in nic.inetAddresses) {
+            if (addr !is java.net.Inet4Address || addr.isLoopbackAddress || addr.isLinkLocalAddress) continue
             val host = addr.hostAddress ?: continue
-            if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) out.add(host)
+            val b = addr.address
+            val cgnat = (b[0].toInt() and 0xff) == 100 && (b[1].toInt() and 0xc0) == 0x40
+            val kind = when {
+              cgnat && (name.startsWith("tun") || name.startsWith("tailscale") || name.startsWith("wg")) -> "tailscale"
+              name.startsWith("rmnet") || name.startsWith("ccmni") || name.startsWith("v4-") ||
+                name.startsWith("pdp") || name.startsWith("wwan") || name.startsWith("clat") -> "cellular"
+              else -> "lan"
+            }
+            out.add(mapOf("ip" to host, "kind" to kind, "iface" to nic.name))
           }
         }
       } catch (_: Exception) {
       }
-      out
+      out.sortedBy { if (it["kind"] == "tailscale") 0 else if (it["kind"] == "lan") 1 else 2 }
     }
 
     AsyncFunction("batteryExempt") {

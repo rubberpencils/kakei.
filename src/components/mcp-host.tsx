@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { handleMcp } from '@/lib/mcp';
 import { setMcpStatus } from '@/lib/mcp-status';
@@ -54,6 +54,30 @@ export function McpHost() {
           return;
         }
         setMcpStatus({ listening: true, port: bound, error: null, addresses });
+
+        // The listener already covers every interface, so it only needs the list kept fresh:
+        // Tailscale can connect after the server starts, and its address changes when you sign in again.
+        if (lan) {
+          let last = JSON.stringify(addresses);
+          const refresh = async () => {
+            const next = await mod.localAddresses().catch(() => null);
+            if (!next || dead) return;
+            const key = JSON.stringify(next);
+            if (key === last) return;
+            last = key;
+            setMcpStatus({ addresses: next });
+          };
+          const timer = setInterval(refresh, 5000);
+          const app = AppState.addEventListener('change', (st) => {
+            if (st === 'active') refresh();
+          });
+          const base = stop;
+          stop = () => {
+            clearInterval(timer);
+            app.remove();
+            base();
+          };
+        }
       } catch (err) {
         if (!dead) setMcpStatus({ listening: false, port: null, error: err instanceof Error ? err.message : 'Could not start' });
       }

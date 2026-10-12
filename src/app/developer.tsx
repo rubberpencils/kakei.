@@ -11,11 +11,7 @@ import { font } from '@/lib/theme';
 
 const newToken = () => Array.from(getRandomBytes(24), (b) => b.toString(16).padStart(2, '0')).join('');
 
-// Tailscale hands out 100.64.0.0/10. It reaches the phone from anywhere and encrypts the traffic.
-const isTailscale = (ip: string) => {
-  const [a, b] = ip.split('.').map(Number);
-  return a === 100 && b >= 64 && b <= 127;
-};
+const kindLabel = { tailscale: 'Tailscale, works anywhere', lan: 'Wi-Fi, same network only', cellular: 'mobile data, not reachable' } as const;
 
 async function needsNotifications() {
   if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return false;
@@ -67,8 +63,9 @@ export default function Developer() {
     }
   };
 
-  const tailscale = status.addresses.find(isTailscale);
-  const host = lan ? tailscale ?? status.addresses[0] ?? '<phone-ip>' : '127.0.0.1';
+  const tailscale = status.addresses.find((a) => a.kind === 'tailscale');
+  // Never fall back to a mobile-data address: it looks usable but nothing outside can reach it.
+  const host = lan ? (tailscale ?? status.addresses.find((a) => a.kind === 'lan'))?.ip ?? '<phone-ip>' : '127.0.0.1';
   const url = `http://${host}:${port}/mcp`;
   const config = JSON.stringify({ mcpServers: { kakei: { url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 
@@ -156,9 +153,9 @@ export default function Developer() {
           <Text selectable style={{ fontFamily: font.mono, fontSize: 13, color: c.fg }}>{url}</Text>
           {lan && status.addresses.length > 1 ? (
             <View style={{ marginTop: 8, gap: 2 }}>
-              {status.addresses.map((ip) => (
-                <Text key={ip} selectable style={{ fontFamily: font.mono, fontSize: 12, color: c.mut }}>
-                  {ip}  {isTailscale(ip) ? 'Tailscale, works anywhere' : 'local network'}
+              {status.addresses.map((a) => (
+                <Text key={a.ip} selectable style={{ fontFamily: font.mono, fontSize: 12, color: c.mut }}>
+                  {a.ip}  {kindLabel[a.kind]}
                 </Text>
               ))}
             </View>

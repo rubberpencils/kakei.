@@ -2,6 +2,8 @@ import { requireNativeModule } from 'expo-modules-core';
 
 export type SmsRow = { sender: string; body: string; date: number };
 export type McpRequest = { id: string; body: string };
+/** kind: tailscale = reachable from anywhere over Tailscale, lan = Wi-Fi or hotspot, cellular = carrier address (not reachable from outside). */
+export type LocalAddress = { ip: string; kind: 'tailscale' | 'lan' | 'cellular'; iface: string };
 
 type Events = { onMcpRequest: (e: McpRequest) => void };
 
@@ -10,7 +12,7 @@ const native = requireNativeModule<{
   startMcp: (port: number, token: string, lan: boolean) => Promise<number>;
   stopMcp: () => Promise<void>;
   mcpReply: (id: string, status: number, body: string) => Promise<void>;
-  localAddresses: () => Promise<string[]>;
+  localAddresses: () => Promise<LocalAddress[]>;
   batteryExempt: () => Promise<boolean>;
   requestBatteryExemption: () => Promise<void>;
   addListener: <K extends keyof Events>(name: K, cb: Events[K]) => { remove: () => void };
