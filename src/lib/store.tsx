@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares } from './ledger';
+import { drainNotify, pushHints, type NotifyItem } from './notify';
 import { parseSms } from './parser';
 import { sampleData, TAGS } from './seed';
 import { readDeviceSms } from './sms';
@@ -240,18 +241,80 @@ function draftFrom(sender: string, body: string, at: string, key: string): Draft
   };
 }
 
+const smsKey = (sender: string, date: number, body: string) => `${sender}|${date}|${body.length}`;
+// The inbox and a notification can hold one message with times a moment apart, so its text and day are what identify it.
+const bodyKey = (sender: string, date: number, body: string) => `b|${sender}|${new Date(date).toDateString()}|${body.length}|${body.slice(0, 60)}`;
+const noonOf = (date: number) => {
+  const d = new Date(date);
+  return localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate());
+};
+
 function addDrafts(s: Local, rows: SmsIn[]) {
   const seen = new Set(s.seen);
   const fresh: Draft[] = [];
   for (const row of rows) {
-    const key = `${row.sender}|${row.date}|${row.body.length}`;
-    if (seen.has(key)) continue;
+    const key = smsKey(row.sender, row.date, row.body);
+    const bkey = bodyKey(row.sender, row.date, row.body);
+    if (seen.has(key) || seen.has(bkey)) continue;
     seen.add(key);
+    seen.add(bkey);
     const d = new Date(row.date);
     const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key);
     if (draft) fresh.push(draft);
   }
-  return { next: { ...s, seen: [...seen].slice(-2000), queue: [...fresh, ...s.queue] }, added: fresh.length };
+  return { next: { ...s, seen: [...seen].slice(-4000), queue: [...fresh, ...s.queue] }, added: fresh.length };
+}
+
+function expenseFromDraft(d: Draft, tag: string | null): Expense {
+  return {
+    id: uid(), merchant: d.merchant, amount: d.amount, at: d.at, tag, rail: d.rail, income: d.income, transfer: d.transfer,
+    recurring: null, recurId: null, groupId: null, payerId: null, shares: null, reflect: true,
+    bank: d.bank, account: d.account, sample: d.sample,
+  };
+}
+
+/**
+ * Takes in what the notifications did. A message nobody answered goes to Review like any other. A message answered with a
+ * tag becomes a personal expense straight away, and one answered "Not mine" is forgotten. Each message is handled once.
+ */
+// The pretend message from the Profile screen. It is shown, never filed.
+const TEST_SENDER = 'KAKEI-TEST';
+
+function applyNotified(s: Local, fresh: NotifyItem[], decided: NotifyItem[]): Local {
+  const seen = new Set(s.seen);
+  let queue = s.queue;
+  let tags = s.tags;
+  const ops: Op[] = [];
+  fresh = fresh.filter((it) => it.sender !== TEST_SENDER);
+  decided = decided.filter((it) => it.sender !== TEST_SENDER);
+  const mark = (it: NotifyItem) => {
+    seen.add(smsKey(it.sender, it.ts, it.body));
+    seen.add(bodyKey(it.sender, it.ts, it.body));
+  };
+  for (const it of fresh) {
+    if (seen.has(bodyKey(it.sender, it.ts, it.body))) continue;
+    mark(it);
+    const d = draftFrom(it.sender, it.body, noonOf(it.ts), smsKey(it.sender, it.ts, it.body));
+    if (d) queue = [d, ...queue];
+  }
+  for (const it of decided) {
+    const match = queue.find((q) => q.sender === it.sender && q.body === it.body);
+    // Already confirmed or ignored inside the app, so there is nothing left to file.
+    if (!match && seen.has(bodyKey(it.sender, it.ts, it.body))) continue;
+    mark(it);
+    if (match) queue = queue.filter((q) => q !== match);
+    if (it.action !== 'tag') continue;
+    const d = match ?? draftFrom(it.sender, it.body, noonOf(it.ts), smsKey(it.sender, it.ts, it.body));
+    const tag = it.tag ? slugTag(it.tag) : '';
+    if (!d || !tag) continue;
+    ops.push({ type: 'expense.upsert', expense: expenseFromDraft(d, tag) });
+    if (!tags.includes(tag)) {
+      tags = [...tags, tag];
+      ops.push({ type: 'prefs.set', prefs: { tags } });
+    }
+  }
+  const next = { ...s, seen: [...seen].slice(-4000), queue };
+  return ops.length ? enqueue(next, ops) : next;
 }
 
 type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
@@ -708,6 +771,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [s, ready, toast, sync]);
 
   useEffect(() => {
+    if (ready) pushHints(s.expenses);
+  }, [ready, s.expenses]);
+
+  useEffect(() => {
     if (!ready || !s.token || !s.outbox.length) return;
     const t = setTimeout(() => api.syncNow(), 400);
     return () => clearTimeout(t);
@@ -715,7 +782,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready || !(s.token || (s.local && !s.connecting))) return;
+    // Whatever you filed from a notification while the app was closed lands here.
+    const drain = async () => {
+      const got = await drainNotify();
+      if (got.fresh.length || got.decided.length) setS((x) => applyNotified(x, got.fresh, got.decided));
+    };
     const scan = async () => {
+      await drain();
       if (!cur.current.smsOn) return;
       const res = await readDeviceSms(80, true);
       if (res.rows.length) setS((x) => addDrafts(x, res.rows).next);
@@ -724,7 +797,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     scan();
     // ponytail: 20s polling, fine for small groups. Switch to server-sent events if group edits must feel instant.
     const poll = setInterval(() => {
-      if (AppState.currentState === 'active') api.syncNow();
+      if (AppState.currentState === 'active') {
+        api.syncNow();
+        drain();
+      }
     }, 20000);
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, ScrollView, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { PrivacyNote } from '@/components/privacy';
 import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
 import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
+import { notifyIsOn, setNotify, testNotify } from '@/lib/notify';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -20,6 +21,20 @@ export default function Profile() {
   const [name, setName] = useState(store.you.name);
   const [budget, setBudget] = useState(store.budget ? String(store.budget) : '');
   const accounts = accountsFrom(store.expenses);
+  const [notify, setNotifyOn] = useState(false);
+  useEffect(() => {
+    notifyIsOn().then(setNotifyOn);
+  }, []);
+  const toggleNotify = async (on: boolean) => {
+    const res = await setNotify(on);
+    if (res === 'ok') {
+      setNotifyOn(on);
+      if (on) store.setSmsOn(true);
+      store.flash(on ? 'Bank SMS will ask how to file them' : 'Notification filing is off');
+    } else if (res === 'denied') store.flash('Allow SMS and notifications for Kakei. in Settings');
+    else if (res === 'ios') store.flash('Notification filing works in the Android app');
+    else store.flash('This needs the latest installed app');
+  };
   const scan = async () => {
     const result = await readDeviceSms();
     if (result.error === 'ios') return store.flash(Platform.OS === 'ios' ? 'On iOS, bank SMS arrive through Shortcuts' : 'Inbox reading works in the Android app');
@@ -72,6 +87,16 @@ export default function Profile() {
       <Press onPress={scan}>
         <Row icon="refresh" title="Scan inbox now" />
       </Press>
+      <Row icon="bell-ring-outline" title="File from the notification" sub={notify ? 'A new bank SMS shows buttons: one tap to tag it, Other to type a tag, Not mine to skip.' : 'Off. Get a notification for each bank SMS and tag it without opening Kakei.'}>
+        <Switch value={notify} onValueChange={toggleNotify} trackColor={{ true: c.acc, false: c.bar }} />
+      </Row>
+      {notify ? (
+        <Press onPress={async () => { if (!(await testNotify())) store.flash('This needs the latest installed app'); }}>
+          <Row icon="flask-outline" title="Send a test notification" sub="A pretend Swiggy payment. Nothing is saved.">
+            <Icon name="chevron-right" size={20} color={c.mut} />
+          </Row>
+        </Press>
+      ) : null}
       {accounts.length ? null : (
         <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, lineHeight: 18, marginTop: 4 }}>
           Accounts and cards appear here by themselves. Kakei reads the bank name and last four digits from each bank SMS you confirm.

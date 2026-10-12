@@ -8,6 +8,15 @@
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <application>
+    <receiver
+      android:name="expo.modules.kakiesms.SmsReceiver"
+      android:exported="true"
+      android:permission="android.permission.BROADCAST_SMS">
+      <intent-filter>
+        <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+      </intent-filter>
+    </receiver>
+    <receiver android:name="expo.modules.kakiesms.NotifyActionReceiver" android:exported="false" />
     <service
       android:name="expo.modules.kakiesms.McpService"
       android:exported="false"

@@ -4,7 +4,7 @@ A phone ledger that turns bank SMS into spends, then splits them with friends. Y
 
 <p align="center">
   <img src="docs/screenshots/05-home.png" width="220" alt="Home" />
-  <img src="docs/screenshots/09-add.png" width="220" alt="Add an expense with Kakei's own keyboard" />
+  <img src="docs/screenshots/09-add.png" width="220" alt="Add an expense" />
   <img src="docs/screenshots/10-group.png" width="220" alt="A group with one running balance" />
 </p>
 
@@ -31,7 +31,7 @@ A phone ledger that turns bank SMS into spends, then splits them with friends. Y
     <td align="center"><img src="docs/screenshots/08-insights.png" width="200" alt="Insights" /><br /><sub>Insights</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/09-add.png" width="200" alt="Add an expense" /><br /><sub>Add, with the built-in keyboard</sub></td>
+    <td align="center"><img src="docs/screenshots/09-add.png" width="200" alt="Add an expense" /><br /><sub>Add an expense</sub></td>
     <td align="center"><img src="docs/screenshots/10-group.png" width="200" alt="Group" /><br /><sub>A group</sub></td>
     <td align="center"><img src="docs/screenshots/11-balances.png" width="200" alt="Balances" /><br /><sub>Who owes what</sub></td>
     <td align="center"><img src="docs/screenshots/12-profile.png" width="200" alt="Profile" /><br /><sub>Profile and privacy</sub></td>
@@ -46,6 +46,13 @@ A phone ledger that turns bank SMS into spends, then splits them with friends. Y
 - A message with ` CC ` in it is a credit card spend. Paying the card off is a transfer, not spend.
 - Android reads the inbox directly. On iOS, a Shortcuts automation hands messages to Kakei.
 
+**File it from the notification (Android)**
+- Turn on **File from the notification** in Profile. Each new bank SMS then shows a notification with the amount and merchant, even when Kakei is closed.
+- One tap on the suggested tag, like **#food**, saves it as an expense. **Other** lets you type any tag right in the notification. **Not mine** drops it.
+- The suggestion learns from you. A merchant you tagged before gets the same tag again, and your most used tags come first.
+- Leave it alone and the message waits in Review. Whatever you filed lands in your ledger the next time Kakei opens.
+- **Send a test notification** in Profile shows a pretend Swiggy payment so you can try the buttons. Nothing is saved.
+
 **Your own money**
 - Home with this month's spend against your budget, Personal with a day-by-day timeline, Insights with charts by tag, and search across everything.
 - Credit card spends add themselves to that card's bill. **Card bills** shows what is due per card and takes full or partial payments.
@@ -59,9 +66,14 @@ A phone ledger that turns bank SMS into spends, then splits them with friends. Y
 - **Settle up** is prefilled with the full amount. Edit it to pay part. Kakei does not move money, you pay however you like and mark it paid.
 - Groups can be shared by code, so friends see the same balances.
 
-**Typing**
-- Kakei draws its own keyboard, so fields look and behave the same on every phone. Number pad for amounts, full keyboard for text, with a caret you can place anywhere by tapping or with the arrow keys.
-- Typing is springy and interruptible. Keys dip under your finger, the caret settles on each letter, and reduced motion turns it all off.
+**Moving around**
+- Swipe sideways to change tab. In Groups, swipe between Groups, Splits and Friends. The same works between a group's Activity, Balances and Totals, and between the filters on a person's page.
+- In Insights, swipe to the next or previous month.
+- Fields use your phone's own keyboard, with the right one for each field: number pad for amounts and phone numbers, text for names.
+
+**Exact amounts**
+- Nothing is rounded. Amounts show paise whenever there are any, like ₹33.33, and balances count down to the paisa.
+- When a split does not divide evenly, the last person takes the odd paisa, so ₹100 between three is 33.33, 33.33 and 33.34, and the shares always add up.
 
 **Developer**
 - Turn the phone into a read-only [MCP](https://modelcontextprotocol.io) server so Cursor, Claude Desktop or any HTTP MCP client can ask about your spending. See [MCP server on your phone](#mcp-server-on-your-phone).
@@ -97,14 +109,14 @@ Kakei does not move money. UPI blocks one-tap payments from an app to a person's
 | --- | --- |
 | App | Expo SDK 57, React Native 0.86, Expo Router (`src/app`), React Compiler, Reanimated |
 | State | One local-first store (`src/lib/store.tsx`) saved to AsyncStorage, with an outbox for group changes |
-| SMS | `modules/kakie-sms`, a native Android module (inbox reading and the MCP listener) |
+| SMS | `modules/kakie-sms`, a native Android module (inbox reading, notification filing and the MCP listener) |
 | Server | Node 22.18+ with built-in `node:sqlite`, no framework (`server/`) |
 | Hosting | Docker, deployed on Coolify |
 
 ```
 src/app          screens (every file is a route)
-src/components   keyboard, input, shared UI, privacy note
-src/lib          store, parser, ledger, keyboard logic, sync client
+src/components   input, swipe tabs, shared UI, privacy note
+src/lib          store, parser, ledger, input rules, notifications, sync client
 modules/         native SMS and MCP module
 server/src       API, SQLite, encryption
 docs/screenshots images used in this README

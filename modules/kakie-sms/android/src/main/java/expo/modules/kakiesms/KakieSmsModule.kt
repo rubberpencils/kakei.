@@ -131,6 +131,37 @@ class KakieSmsModule : Module() {
       out.sortedBy { if (it["kind"] == "tailscale") 0 else if (it["kind"] == "lan") 1 else 2 }
     }
 
+    // Notification filing. The receiver in SmsNotify.kt does the work while the app is closed. JS only toggles it,
+    // teaches it the user's tags, and drains what happened since it last looked.
+    AsyncFunction("notifyEnabled") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      SmsNotify.enabled(ctx)
+    }
+
+    AsyncFunction("notifySetEnabled") { on: Boolean ->
+      val ctx = appContext.reactContext ?: throw CodedException("No react context")
+      SmsNotify.setEnabled(ctx, on)
+      null
+    }
+
+    AsyncFunction("notifySetHints") { tags: List<String>, hints: Map<String, String> ->
+      val ctx = appContext.reactContext ?: throw CodedException("No react context")
+      SmsNotify.setHints(ctx, tags, hints)
+      null
+    }
+
+    // A pretend bank message, so the notification can be tried without waiting for a real one. JS never files it.
+    AsyncFunction("notifyTest") {
+      val ctx = appContext.reactContext ?: throw CodedException("No react context")
+      SmsNotify.onSms(ctx, "KAKEI-TEST", "Rs 349.00 spent on SWIGGY via UPI on 01-01-26. Ref 000000000000. Not a real message.", System.currentTimeMillis(), true)
+      null
+    }
+
+    AsyncFunction("notifyDrain") {
+      val ctx = appContext.reactContext ?: throw CodedException("No react context")
+      SmsNotify.drain(ctx).toString()
+    }
+
     AsyncFunction("batteryExempt") {
       val ctx = appContext.reactContext ?: return@AsyncFunction false
       (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)

@@ -13,6 +13,11 @@ const native = requireNativeModule<{
   stopMcp: () => Promise<void>;
   mcpReply: (id: string, status: number, body: string) => Promise<void>;
   localAddresses: () => Promise<LocalAddress[]>;
+  notifyEnabled: () => Promise<boolean>;
+  notifySetEnabled: (on: boolean) => Promise<void>;
+  notifySetHints: (tags: string[], hints: Record<string, string>) => Promise<void>;
+  notifyDrain: () => Promise<string>;
+  notifyTest: () => Promise<void>;
   batteryExempt: () => Promise<boolean>;
   requestBatteryExemption: () => Promise<void>;
   addListener: <K extends keyof Events>(name: K, cb: Events[K]) => { remove: () => void };
@@ -53,6 +58,38 @@ export async function localAddresses(): Promise<LocalAddress[]> {
     }
   }
   return out;
+}
+
+/** A bank message that got a notification. action is set once the user answered from the notification. */
+export type NotifyItem = { id: string; sender: string; body: string; ts: number; action?: 'tag' | 'ignore'; tag?: string };
+
+export function notifyEnabled() {
+  return native.notifyEnabled();
+}
+
+export function notifySetEnabled(on: boolean) {
+  return native.notifySetEnabled(on);
+}
+
+/** Shows a pretend bank message as a notification so the buttons can be tried. It is never filed. */
+export function notifyTest() {
+  return native.notifyTest();
+}
+
+/** The user's most used tags, and the tag they gave each merchant before, so the notification can suggest the right one. */
+export function notifySetHints(tags: string[], hints: Record<string, string>) {
+  return native.notifySetHints(tags, hints);
+}
+
+/** New messages since the last call, and answers given from notifications. Each is handed over once. */
+export async function notifyDrain(): Promise<{ fresh: NotifyItem[]; decided: NotifyItem[] }> {
+  const parsed = JSON.parse(await native.notifyDrain());
+  const clean = (list: unknown): NotifyItem[] => (Array.isArray(list) ? list.map((x) => ({
+    id: String(x.id), sender: String(x.sender), body: String(x.body), ts: Number(x.ts),
+    action: x.action === 'tag' || x.action === 'ignore' ? x.action : undefined,
+    tag: typeof x.tag === 'string' ? x.tag : undefined,
+  })) : []);
+  return { fresh: clean(parsed.fresh), decided: clean(parsed.decided) };
 }
 
 /** True when Android will not put the app to sleep to save battery. */
