@@ -1,6 +1,6 @@
 import type { Expense, Group, MonthSnapshot, Settlement } from './types';
 
-export const DEFAULT_API = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
+export const DEFAULT_API = process.env.EXPO_PUBLIC_API_URL ?? 'https://kakei.169.58.42.62.sslip.io';
 
 export type Op =
   | { type: 'group.upsert'; group: Pick<Group, 'id' | 'name' | 'icon' | 'note'> & { sample?: boolean; simplify?: boolean; kind?: 'group' | 'split' } }
