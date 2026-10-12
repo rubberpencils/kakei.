@@ -31,6 +31,10 @@ type Local = {
   seen: string[];
   smsOn: boolean;
   dev: DevSettings;
+  // Local mode: no account, no server. Everything lives on this phone.
+  local: boolean;
+  // True while a local user is on the account screen to start syncing.
+  connecting: boolean;
   outbox: Queued[];
   syncedAt: number | null;
 };
@@ -53,6 +57,8 @@ const FRESH: Local = {
   seen: [],
   smsOn: false,
   dev: { mcp: false, lan: false, port: 8765, token: '' },
+  local: false,
+  connecting: false,
   outbox: [],
   syncedAt: null,
 };
@@ -122,7 +128,41 @@ function applyOp(s: Local, op: Op): Local {
 function enqueue(s: Local, ops: Op[]): Local {
   let next = s;
   for (const op of ops) next = applyOp(next, op);
+  // Without an account there is nothing to send to.
+  if (!next.token) return next;
   return { ...next, outbox: [...next.outbox, ...ops.map((op) => ({ ...op, qid: uid() }) as Queued)] };
+}
+
+// Local data gets the server's id for "you" when an account is made, so the bills you paid stay yours.
+function remapYou(s: Local, to: string): Local {
+  const from = s.you.id;
+  if (from === to) return s;
+  const swap = (id: string) => (id === from ? to : id);
+  return {
+    ...s,
+    expenses: s.expenses.map((e) => ({
+      ...e,
+      payerId: e.payerId ? swap(e.payerId) : e.payerId,
+      shares: e.shares ? Object.fromEntries(Object.entries(e.shares).map(([k, v]) => [swap(k), v])) : e.shares,
+    })),
+    settlements: s.settlements.map((x) => ({ ...x, fromId: swap(x.fromId), toId: swap(x.toId) })),
+  };
+}
+
+// Everything on the phone, as ops, so a new account starts with what you already have.
+function snapshotOps(s: Local): Op[] {
+  const ops: Op[] = [];
+  for (const g of s.groups) {
+    ops.push({ type: 'group.upsert', group: { id: g.id, name: g.name, icon: g.icon, note: g.note, kind: g.kind ?? 'group', simplify: g.simplify !== false, sample: g.sample } });
+    for (const pid of g.memberIds) {
+      const p = s.people.find((x) => x.id === pid);
+      if (p) ops.push({ type: 'person.add', groupId: g.id, person: { id: p.id, name: p.name } });
+    }
+  }
+  for (const expense of s.expenses) ops.push({ type: 'expense.upsert', expense });
+  for (const settlement of s.settlements) ops.push({ type: 'settlement.upsert', settlement });
+  ops.push({ type: 'prefs.set', prefs: { budget: s.budget, tags: s.tags, history: s.history } });
+  return ops;
 }
 
 function rebase(s: Local, r: Remote): Local {
@@ -177,7 +217,9 @@ function addDrafts(s: Local, rows: SmsIn[]) {
 
 type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   ready: boolean;
+  // signedIn: has an account on the server. entered: past onboarding, with or without an account.
   signedIn: boolean;
+  entered: boolean;
   toast: string;
   sync: SyncState;
   pending: number;
@@ -186,6 +228,9 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   setBase: (raw: string) => Promise<string | null>;
   signUp: (name: string, phone: string, password: string) => Promise<string | null>;
   signIn: (phone: string, password: string) => Promise<string | null>;
+  startLocal: (name: string) => void;
+  connect: () => void;
+  cancelConnect: () => void;
   signOut: () => void;
   syncNow: () => Promise<void>;
   setSmsOn: (on: boolean) => void;
@@ -272,8 +317,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       busy.current = true;
       setSync('syncing');
       try {
-        const sent = cur.current.outbox;
-        if (sent.length) {
+        const queued = cur.current.outbox;
+        // The server takes at most 500 ops a request. Moving a whole local ledger over can be more than that.
+        for (let i = 0; i < queued.length; i += 400) {
+          const sent = queued.slice(i, i + 400);
           const res = await call<{ results: { ok: boolean; error?: string }[] }>(base, token, 'POST', '/ops', {
             ops: sent.map(({ qid: _qid, ...op }) => op),
           });
@@ -306,6 +353,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const res = await call<{ token: string; you: Remote['you'] }>(base, null, 'POST', path, body);
         setS((x) => {
+          if (x.local) {
+            const mine = remapYou(x, res.you.id);
+            const connected: Local = {
+              ...mine, base, token: res.token, you: person(res.you.id, res.you.name), phone: res.you.phone,
+              local: false, connecting: false, outbox: [],
+            };
+            return enqueue(connected, snapshotOps(connected));
+          }
           const same = x.you.id === res.you.id;
           return {
             ...(same ? x : { ...FRESH, queue: x.queue, seen: x.seen, smsOn: x.smsOn }),
@@ -327,6 +382,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...s,
       ready,
       signedIn: !!s.token,
+      entered: !!s.token || (s.local && !s.connecting),
       toast,
       sync,
       pending: s.outbox.length,
@@ -346,6 +402,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       signUp: (name, phone, password) => authed('/auth/signup', { name, phone, password }),
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
+      startLocal: (name) =>
+        setS((x) =>
+          x.local
+            ? { ...x, connecting: false }
+            : { ...FRESH, base: x.base, queue: x.queue, seen: x.seen, smsOn: x.smsOn, dev: x.dev, you: person(uid(), name.trim() || 'You'), local: true },
+        ),
+      connect: () => setS((x) => (x.local ? { ...x, connecting: true } : x)),
+      cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
       signOut: () => {
         const { base, token } = cur.current;
         if (token) call(base, token, 'POST', '/auth/logout').catch(() => {});
@@ -480,6 +544,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteGroup: (id) => commit([{ type: 'group.delete', id }]),
       previewInvite: async (code) => {
         const { base, token } = cur.current;
+        if (!token) return 'Joining a group needs sync. Turn it on in Profile, then try again.';
         try {
           return await call<Invite>(base, token, 'GET', `/invite/${encodeURIComponent(code.trim().toUpperCase())}`);
         } catch (err) {
@@ -488,6 +553,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       joinGroup: async (code, claimId) => {
         const { base, token } = cur.current;
+        if (!token) return 'Joining a group needs sync. Turn it on in Profile, then try again.';
         try {
           const res = await call<{ groupId: string }>(base, token, 'POST', '/join', { code: code.trim().toUpperCase(), claimId });
           await syncNow();
@@ -546,7 +612,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready, s.token, s.outbox, api]);
 
   useEffect(() => {
-    if (!ready || !s.token) return;
+    if (!ready || !(s.token || (s.local && !s.connecting))) return;
     const scan = async () => {
       if (!cur.current.smsOn) return;
       const res = await readDeviceSms(80, true);
@@ -568,7 +634,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       sub.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, s.token]);
+  }, [ready, s.token, s.local, s.connecting]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

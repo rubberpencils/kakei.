@@ -72,7 +72,7 @@ try {
 
   await call('POST', '/ops', B, {
     ops: [
-      { type: 'settlement.upsert', settlement: { id: 'set001', groupId: 'goa01', fromId: bid, toId: aid, amount: 600, at: '2026-09-25T12:00:00', method: 'upi' } },
+      { type: 'settlement.upsert', settlement: { id: 'set001', groupId: 'goa01', fromId: bid, toId: aid, amount: 600, at: '2026-09-25T12:00:00' } },
       { type: 'expense.upsert', expense: { ...s2.json.expenses[0], reflect: false } },
     ],
   });

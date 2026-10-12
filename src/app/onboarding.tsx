@@ -32,7 +32,8 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
   const reduce = useReducedMotion();
   const store = useStore();
-  const [step, setStep] = useState(0);
+  // Someone already using Kakei on this phone who taps "Sync with friends" lands straight on the account step.
+  const [step, setStep] = useState(store.local ? 4 : 0);
   const [dir, setDir] = useState(1);
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
   const [budget, setBudget] = useState(30000);
@@ -142,7 +143,7 @@ export default function Onboarding() {
 
           {step === 3 ? <Budget budget={budget} setBudget={setBudget} back={() => go(2)} onNext={() => go(4)} rise={rise} /> : null}
 
-          {step === 4 ? <Account mode={mode} setMode={setMode} budget={mode === 'signup' ? budget : 0} back={() => go(mode === 'login' ? 0 : 3)} rise={rise} /> : null}
+          {step === 4 ? <Account mode={mode} setMode={setMode} budget={mode === 'signup' ? budget : 0} back={() => (store.local ? store.cancelConnect() : go(mode === 'login' ? 0 : 3))} rise={rise} /> : null}
         </Animated.View>
       </View>
     </KeyboardAvoidingView>
@@ -241,6 +242,13 @@ function Account({
     }
   };
 
+  // No account, no server. Everything stays on this phone.
+  const keepLocal = () => {
+    store.startLocal(name.trim() || 'You');
+    if (!store.local && budget > 0) store.setBudget(budget);
+    buzz('done');
+  };
+
   const saveServer = async () => {
     setServerError(null);
     const err = await store.setBase(server);
@@ -252,9 +260,13 @@ function Account({
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
       <Back to={back} />
       <Animated.View entering={rise(0)}>
-        <Word size={32} style={{ marginTop: 16, lineHeight: 36 }}>{mode === 'signup' ? 'Make your account' : 'Welcome back'}</Word>
+        <Word size={32} style={{ marginTop: 16, lineHeight: 36 }}>{store.local ? 'Sync with friends' : mode === 'signup' ? 'Make your account' : 'Welcome back'}</Word>
         <Body color={c.mut} style={{ marginTop: 10, lineHeight: 22 }}>
-          {mode === 'signup' ? 'Your phone number is how friends find you in groups.' : 'Log in with the phone number you signed up with.'}
+          {store.local
+            ? 'Only needed to share groups. Everything you have now moves to the account.'
+            : mode === 'signup'
+              ? 'An account is only for sharing groups with friends. Your phone number is how they find you.'
+              : 'Log in with the phone number you signed up with.'}
         </Body>
       </Animated.View>
       <Animated.View entering={rise(1)} style={{ gap: 16, marginTop: 28 }}>
@@ -285,6 +297,7 @@ function Account({
         label={mode === 'signup' ? 'I already have an account' : 'New here? Make an account'}
         onPress={() => { setError(null); setMode(mode === 'signup' ? 'login' : 'signup'); }}
       />
+      <Ghost label={store.local ? 'Not now, keep it on this phone' : 'Skip the account, keep it on this phone'} onPress={keepLocal} />
     </ScrollView>
   );
 }

@@ -1,4 +1,3 @@
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
@@ -6,10 +5,9 @@ import { handleMcp } from '@/lib/mcp';
 import { setMcpStatus } from '@/lib/mcp-status';
 import { useStore } from '@/lib/store';
 
-const TAG = 'kakei-mcp';
-
 // Runs the on-phone MCP server while Developer > MCP is on. It holds nothing of its own:
 // each request is answered from the live store, then the answer goes back out through the native socket.
+// A foreground service (started by the native module) keeps the app alive when you leave it.
 export function McpHost() {
   const store = useStore();
   const latest = useRef(store);
@@ -18,7 +16,7 @@ export function McpHost() {
   });
 
   const { mcp, lan, port, token } = store.dev;
-  const on = mcp && store.signedIn && Platform.OS === 'android' && token.length >= 16;
+  const on = mcp && store.entered && Platform.OS === 'android' && token.length >= 16;
 
   useEffect(() => {
     if (!on) {
@@ -56,7 +54,6 @@ export function McpHost() {
           return;
         }
         setMcpStatus({ listening: true, port: bound, error: null, addresses });
-        activateKeepAwakeAsync(TAG).catch(() => {});
       } catch (err) {
         if (!dead) setMcpStatus({ listening: false, port: null, error: err instanceof Error ? err.message : 'Could not start' });
       }
@@ -65,7 +62,6 @@ export function McpHost() {
     return () => {
       dead = true;
       stop?.();
-      deactivateKeepAwake(TAG).catch(() => {});
       setMcpStatus({ listening: false, port: null });
     };
   }, [on, port, token, lan]);

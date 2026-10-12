@@ -24,7 +24,7 @@ import { dark, light } from '@/lib/theme';
 SplashScreen.preventAutoHideAsync();
 
 function Shell() {
-  const { ready, signedIn } = useStore();
+  const { ready, entered } = useStore();
   const reduce = useReducedMotion();
   const scheme = useColorScheme();
   const bg = scheme === 'dark' ? dark.bg : light.bg;
@@ -42,7 +42,7 @@ function Shell() {
             animation: reduce ? 'fade' : 'slide_from_right',
           }}
         >
-          <Stack.Protected guard={signedIn}>
+          <Stack.Protected guard={entered}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="add" options={{ presentation: 'modal', animation: reduce ? 'fade' : 'slide_from_bottom' }} />
             <Stack.Screen name="review" />
@@ -59,7 +59,7 @@ function Shell() {
             <Stack.Screen name="sms" />
             <Stack.Screen name="search" options={{ animation: reduce ? 'fade' : 'fade_from_bottom' }} />
           </Stack.Protected>
-          <Stack.Protected guard={!signedIn}>
+          <Stack.Protected guard={!entered}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
           </Stack.Protected>
         </Stack>

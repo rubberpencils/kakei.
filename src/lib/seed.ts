@@ -87,13 +87,13 @@ export function sampleData(youId: string) {
     ge('l2', 'Meghana Foods', 1920, 12, 'food', 'upi', 'lunch', 'ishaan', lunch),
     ge('c1', 'Airport cab', 900, 27, 'transport', 'upi', 'cab', 'you', ['you', 'tara']),
   ];
-  const S = (key: string, group: string, from: string, to: string, amount: number, day: number, method: Settlement['method']): Settlement => ({
-    id: id(key), groupId: id(group), fromId: id(from), toId: id(to), amount, at: localNoon(2026, 9, day), method, sample: true,
+  const S = (key: string, group: string, from: string, to: string, amount: number, day: number): Settlement => ({
+    id: id(key), groupId: id(group), fromId: id(from), toId: id(to), amount, at: localNoon(2026, 9, day), sample: true,
   });
   const settlements = [
-    S('set1', 'goa', 'aarav', 'you', 1200, 25, 'upi'),
-    S('set2', 'lunch', 'ishaan', 'you', 620, 20, 'upi'),
-    S('set3', 'lunch', 'tara', 'you', 620, 20, 'cash'),
+    S('set1', 'goa', 'aarav', 'you', 1200, 25),
+    S('set2', 'lunch', 'ishaan', 'you', 620, 20),
+    S('set3', 'lunch', 'tara', 'you', 620, 20),
   ];
   const queue: Draft[] = RAWS.map(([key, sender, body]) => {
     const parsed = parseSms(sender, body);

@@ -29,6 +29,10 @@ export default function Profile() {
   };
 
   const signOut = () => {
+    if (!store.signedIn) {
+      ask({ title: 'Erase everything on this phone?', body: 'Your expenses, splits and groups are deleted. Nothing is stored anywhere else, so this cannot be undone.', confirm: 'Erase', destructive: true, onConfirm: store.signOut });
+      return;
+    }
     const msg = store.pending ? `${store.pending} changes have not reached the server and will be lost.` : 'You can log back in with your phone number.';
     ask({ title: 'Sign out?', body: msg, confirm: 'Sign out', destructive: true, onConfirm: store.signOut });
   };
@@ -48,7 +52,7 @@ export default function Profile() {
         <Avatar id={store.you.id} label={store.you.initials} size={64} you />
         <View style={{ flex: 1 }}>
           <TextInput value={name} onChangeText={setName} onEndEditing={() => store.setName(name)} onBlur={() => store.setName(name)} style={{ fontFamily: font.semi, fontSize: 19, color: c.fg, padding: 0 }} />
-          <Text style={{ fontFamily: font.mono, fontSize: 12.5, color: c.mut, marginTop: 4 }}>{store.phone}</Text>
+          <Text style={{ fontFamily: font.mono, fontSize: 12.5, color: c.mut, marginTop: 4 }}>{store.signedIn ? store.phone : 'On this phone only'}</Text>
         </View>
       </View>
       <Press onPress={() => router.push({ pathname: '/person/[id]', params: { id: store.you.id } })} style={{ marginTop: 12 }}>
@@ -86,15 +90,30 @@ export default function Profile() {
       </View>
       <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut }}>One number for the month. Spend under it is savings.</Text>
 
-      <Label>Server</Label>
-      <Row icon="server-network" title={store.base.replace(/^https?:\/\//, '')} sub={syncLine}>
-        <Press onPress={store.syncNow} style={{ height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
-          <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 12.5 }}>Sync now</Text>
-        </Press>
-      </Row>
-      <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 10, lineHeight: 18 }}>
-        Groups, expenses and settlements live on this server so everyone in a group sees the same balances. Changes made offline are sent when you reconnect.
-      </Text>
+      <Label>Sync and sharing</Label>
+      {store.signedIn ? (
+        <>
+          <Row icon="server-network" title={store.base.replace(/^https?:\/\//, '')} sub={syncLine}>
+            <Press onPress={store.syncNow} style={{ height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: c.line, justifyContent: 'center' }}>
+              <Text style={{ fontFamily: font.medium, color: c.fg, fontSize: 12.5 }}>Sync now</Text>
+            </Press>
+          </Row>
+          <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 10, lineHeight: 18 }}>
+            Groups, expenses and settlements live on this server so everyone in a group sees the same balances. Changes made offline are sent when you reconnect.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Press onPress={store.connect}>
+            <Row icon="account-sync-outline" title="Sync with friends" sub="Off. Everything stays on this phone">
+              <Icon name="chevron-right" size={20} color={c.mut} />
+            </Row>
+          </Press>
+          <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 10, lineHeight: 18 }}>
+            Not needed for your own spending, SMS import or quick splits. Turn it on only to share a group so everyone sees the same balances. What you have now moves with you.
+          </Text>
+        </>
+      )}
 
       <Label>Sample data</Label>
       {store.hasSample ? (
@@ -115,12 +134,12 @@ export default function Profile() {
       </Press>
 
       <Press onPress={signOut} style={{ marginTop: 28 }}>
-        <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>Sign out</Text>
+        <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>{store.signedIn ? 'Sign out' : 'Erase everything on this phone'}</Text>
       </Press>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 24 }}>
         <Icon name="lock-outline" size={18} color={c.mut} />
         <Text style={{ flex: 1, fontFamily: font.body, fontSize: 12.5, lineHeight: 18, color: c.mut }}>
-          Messages are parsed on this phone. Only the amount, merchant, date, rail and last four digits of the account reach the server. The message text never leaves the phone.
+          Messages are parsed on this phone. The message text never leaves it.{store.signedIn ? ' Only the amount, merchant, date, rail and last four digits of the account reach the server.' : ' With sync off, nothing reaches any server.'}
         </Text>
       </View>
     </ScrollView>

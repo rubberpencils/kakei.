@@ -1,7 +1,13 @@
 package expo.modules.kakiesms
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.provider.Telephony
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
@@ -72,6 +78,7 @@ class KakieSmsModule : Module() {
         throw CodedException("Port $port is busy")
       }
       mcpSocket = socket
+      startHostService()
       Thread {
         while (!socket.isClosed) {
           val client = try { socket.accept() } catch (_: Exception) { break }
@@ -105,12 +112,38 @@ class KakieSmsModule : Module() {
       out
     }
 
+    AsyncFunction("batteryExempt") {
+      val ctx = appContext.reactContext ?: return@AsyncFunction false
+      (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+    }
+
+    // Opens the system "let this app run in the background" prompt. Without it Doze can cut the network when the screen is off.
+    AsyncFunction("requestBatteryExemption") {
+      val ctx = appContext.reactContext ?: throw CodedException("No react context")
+      val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      null
+    }
+
     OnDestroy { stopListener() }
+  }
+
+  private fun startHostService() {
+    val ctx = appContext.reactContext ?: return
+    val intent = Intent(ctx, McpService::class.java)
+    try {
+      if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(intent) else ctx.startService(intent)
+    } catch (_: Exception) {
+    }
   }
 
   private fun stopListener() {
     try { mcpSocket?.close() } catch (_: Exception) {}
     mcpSocket = null
+    appContext.reactContext?.let { ctx ->
+      try { ctx.stopService(Intent(ctx, McpService::class.java)) } catch (_: Exception) {}
+    }
     for (f in waiting.values) f.complete(McpReply(503, ""))
     waiting.clear()
   }

@@ -49,7 +49,6 @@ export type Settlement = {
   toId: string;
   amount: number;
   at: string;
-  method: 'upi' | 'cash';
   sample?: boolean;
 };
 

@@ -1,6 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { getRandomBytes } from 'expo-crypto';
-import { Platform, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { AppState, PermissionsAndroid, Platform, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ask, Back, buzz, Icon, Press, Segmented, Toggle, usePalette, Word } from '@/components/ui';
@@ -10,6 +11,17 @@ import { font } from '@/lib/theme';
 
 const newToken = () => Array.from(getRandomBytes(24), (b) => b.toString(16).padStart(2, '0')).join('');
 
+// Tailscale hands out 100.64.0.0/10. It reaches the phone from anywhere and encrypts the traffic.
+const isTailscale = (ip: string) => {
+  const [a, b] = ip.split('.').map(Number);
+  return a === 100 && b >= 64 && b <= 127;
+};
+
+async function needsNotifications() {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return false;
+  return !(await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS));
+}
+
 export default function Developer() {
   const c = usePalette();
   const insets = useSafeAreaInsets();
@@ -17,15 +29,61 @@ export default function Developer() {
   const status = useMcpStatus();
   const { mcp, lan, port, token } = store.dev;
   const android = Platform.OS === 'android';
+  const [battery, setBattery] = useState<boolean | null>(null);
+  const [notify, setNotify] = useState<boolean | null>(null);
 
-  const host = lan ? status.addresses[0] ?? '<phone-ip>' : '127.0.0.1';
+  const refresh = useCallback(async () => {
+    if (!android) return;
+    setNotify(!(await needsNotifications()));
+    try {
+      const mod = await import('../../modules/kakie-sms');
+      setBattery(await mod.batteryExempt());
+    } catch {
+      setBattery(null);
+    }
+  }, [android]);
+
+  useEffect(() => {
+    const first = setTimeout(refresh, 0);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refresh();
+    });
+    return () => {
+      clearTimeout(first);
+      sub.remove();
+    };
+  }, [refresh]);
+
+  const askNotifications = async () => {
+    await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    refresh();
+  };
+  const askBattery = async () => {
+    try {
+      const mod = await import('../../modules/kakie-sms');
+      await mod.requestBatteryExemption();
+    } catch {
+      store.flash('Open Android settings > Apps > Kakei > Battery and choose Unrestricted');
+    }
+  };
+
+  const tailscale = status.addresses.find(isTailscale);
+  const host = lan ? tailscale ?? status.addresses[0] ?? '<phone-ip>' : '127.0.0.1';
   const url = `http://${host}:${port}/mcp`;
   const config = JSON.stringify({ mcpServers: { kakei: { url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 
-  const toggle = () => {
+  const toggle = async () => {
     buzz();
-    if (!mcp) store.setDev({ mcp: true, token: token || newToken() });
-    else store.setDev({ mcp: false });
+    if (mcp) return store.setDev({ mcp: false });
+    store.setDev({ mcp: true, token: token || newToken() });
+    // A foreground service needs a visible notification, and Android needs to let the app run while the screen is off.
+    if (await needsNotifications()) await askNotifications();
+    try {
+      const mod = await import('../../modules/kakie-sms');
+      if (!(await mod.batteryExempt())) await mod.requestBatteryExemption();
+    } catch {
+      // The toggle still works. The row below shows what is missing.
+    }
   };
   const rotate = () =>
     ask({
@@ -70,20 +128,44 @@ export default function Developer() {
 
       {mcp && android ? (
         <>
+          <Text style={label(c.mut)}>Keep it running</Text>
+          <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginBottom: 6, lineHeight: 18 }}>
+            It keeps answering when you leave the app, as long as you do not swipe Kakei away. A notification shows while it runs.
+          </Text>
+          <Check ok={notify} title="Show a notification" sub="Android needs one for anything running in the background" action="Allow" onPress={askNotifications} />
+          <Check ok={battery} title="Run with the screen off" sub="Stops Android from putting Kakei to sleep" action="Allow" onPress={askBattery} />
+
           <Text style={label(c.mut)}>How it connects</Text>
           <Segmented
-            options={[{ id: 'usb', label: 'USB only' }, { id: 'wifi', label: 'Wi-Fi' }]}
-            value={lan ? 'wifi' : 'usb'}
-            onChange={(v) => store.setDev({ lan: v === 'wifi' })}
+            options={[{ id: 'usb', label: 'USB only' }, { id: 'net', label: 'Anywhere' }]}
+            value={lan ? 'net' : 'usb'}
+            onChange={(v) => store.setDev({ lan: v === 'net' })}
           />
           <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 10, lineHeight: 18 }}>
             {lan
-              ? 'Anyone on the same Wi-Fi can reach the port, but nothing is answered without the token. Use a network you trust.'
+              ? 'Listens on every network the phone is on. Nothing is answered without the token. Wi-Fi traffic is not encrypted, so away from home use Tailscale: install it on the phone and the computer, then use the Tailscale address below. It works on mobile data too.'
               : `Nothing leaves the phone over the network. With the phone plugged in, run adb reverse tcp:${port} tcp:${port} on the computer.`}
           </Text>
+          {lan ? (
+            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8, lineHeight: 18 }}>
+              Kakei does not open the phone to the public internet. Mobile networks block inbound connections, and anything reaching it that way would be unencrypted.
+            </Text>
+          ) : null}
 
           <Text style={label(c.mut)}>Address</Text>
           <Text selectable style={{ fontFamily: font.mono, fontSize: 13, color: c.fg }}>{url}</Text>
+          {lan && status.addresses.length > 1 ? (
+            <View style={{ marginTop: 8, gap: 2 }}>
+              {status.addresses.map((ip) => (
+                <Text key={ip} selectable style={{ fontFamily: font.mono, fontSize: 12, color: c.mut }}>
+                  {ip}  {isTailscale(ip) ? 'Tailscale, works anywhere' : 'local network'}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {lan && !tailscale && status.listening ? (
+            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8, lineHeight: 18 }}>No Tailscale address found. Install Tailscale on the phone to reach it away from home.</Text>
+          ) : null}
 
           <Text style={label(c.mut)}>Token</Text>
           <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, lineHeight: 18 }}>{token}</Text>
@@ -106,12 +188,27 @@ export default function Developer() {
             Shared: amounts, merchants, tags, dates, your share of each bill, groups and balances.{'\n'}
             Never shared: bank SMS text, account numbers, your phone number, your password.
           </Text>
-          <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 14, lineHeight: 18 }}>
-            Kakei keeps the screen awake while this is on, and the server stops when you close the app. It answers only while the app is open.
-          </Text>
         </>
       ) : null}
     </ScrollView>
+  );
+}
+
+function Check({ ok, title, sub, action, onPress }: { ok: boolean | null; title: string; sub: string; action: string; onPress: () => void }) {
+  const c = usePalette();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 }}>
+      <Icon name={ok ? 'check-circle' : 'circle-outline'} size={22} color={ok ? c.pos : c.mut} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 14.5, color: c.fg }}>{title}</Text>
+        <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 2 }}>{sub}</Text>
+      </View>
+      {ok ? null : (
+        <Press onPress={onPress} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: c.acc, justifyContent: 'center' }}>
+          <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 12.5 }}>{action}</Text>
+        </Press>
+      )}
+    </View>
   );
 }
 

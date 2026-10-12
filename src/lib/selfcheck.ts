@@ -34,7 +34,7 @@ const dinner: Expense = {
   income: false, transfer: false, recurring: null, recurId: null, groupId: 'goa', payerId: 'ananya',
   shares, reflect: true,
 };
-const sets: Settlement[] = [{ id: 's', groupId: 'goa', fromId: 'aarav', toId: 'ananya', amount: 1200, at: '2026-09-25T12:00:00', method: 'upi' }];
+const sets: Settlement[] = [{ id: 's', groupId: 'goa', fromId: 'aarav', toId: 'ananya', amount: 1200, at: '2026-09-25T12:00:00' }];
 const rem = remainingOwed([dinner], sets);
 eq(owedBack(dinner, 'ananya', rem), 2400, 'owed');
 eq(pocket(dinner, 'ananya'), 1200, 'only your share is spend');
@@ -76,12 +76,12 @@ eq(reroutes(fan, fan).length, 0, 'nothing rerouted when not simplified');
 const lunch: Expense = { ...dinner, id: 'l', groupId: null, payerId: null, shares: null, amount: 50, at: '2026-10-01T12:00:00' };
 const cab: Expense = { ...dinner, id: 'cab', groupId: 'g', payerId: 'me', shares: { me: 50, b: 50 }, amount: 100, at: '2026-10-02T12:00:00' };
 const theirs: Expense = { ...cab, id: 'x', payerId: 'b', shares: { me: 40, b: 40 }, amount: 80 };
-const flow = cashFlow([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'upi' }], 'me', '2026-10-01', '2026-10-31');
+const flow = cashFlow([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00' }], 'me', '2026-10-01', '2026-10-31');
 eq(flow.spent, 140, 'spend is your own spend plus only your share of each split');
 eq(flow.owed, 20, 'still coming back from the bill you paid');
 eq(flow.byDay['2026-10-02'], 90, 'calendar shows your shares, not the full bills');
 
-const month = spendIn([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'upi' }], 'me', '2026-10-01', '2026-10-31');
+const month = spendIn([lunch, cab, theirs], [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00' }], 'me', '2026-10-01', '2026-10-31');
 eq(month.total, 140, 'home spend is share only');
 eq(month.back, 20, 'home shows what is still to get back');
 const paidForFriends: Expense = { ...cab, id: 'pf', shares: { b: 100 }, amount: 100 };
@@ -95,7 +95,7 @@ const mcpData: McpData = {
   people: [{ id: 'b', name: 'Bela', initials: 'BE' }],
   groups: [{ id: 'g', name: 'Airport cab', icon: 'call-split', memberIds: ['b'], note: '', kind: 'split' }],
   expenses: [lunch, cab, theirs],
-  settlements: [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00', method: 'cash' }],
+  settlements: [{ id: 'p', groupId: 'g', fromId: 'b', toId: 'me', amount: 30, at: '2026-10-03T12:00:00' }],
   budget: 1000,
   now: new Date('2026-10-15T12:00:00'),
 };

@@ -290,7 +290,7 @@ export function SettleRow({ s, you, name, onPress }: { s: Settlement; you: strin
       </View>
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: font.body, fontSize: 13.5, color: c.mut }} numberOfLines={1}>{who}</Text>
-        <Text style={{ fontFamily: font.body, fontSize: 11.5, color: c.mut, opacity: 0.75, marginTop: 1 }}>{s.method === 'upi' ? 'Paid by UPI' : 'Marked as done'}</Text>
+        <Text style={{ fontFamily: font.body, fontSize: 11.5, color: c.mut, opacity: 0.75, marginTop: 1 }}>Marked as done</Text>
       </View>
       <Text style={{ fontFamily: font.medium, fontSize: 13.5, color: mine ? c.pos : c.mut }}>₹{inr(s.amount)}</Text>
     </Press>

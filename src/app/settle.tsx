@@ -60,7 +60,7 @@ export default function Settle() {
 
   const record = () => {
     if (!amount) return;
-    store.settle({ groupId: group.id, fromId: chosen.fromId, toId: chosen.toId, amount, at: new Date().toISOString(), method: 'cash' });
+    store.settle({ groupId: group.id, fromId: chosen.fromId, toId: chosen.toId, amount, at: new Date().toISOString() });
     buzz('done');
     setDone({
       line: `₹${inr(amount)} ${youPay ? `paid to ${otherName}` : `received from ${otherName}`}`,

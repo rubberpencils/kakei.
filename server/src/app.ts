@@ -346,7 +346,6 @@ export function createApp(db: DatabaseSync, opts: { cors: string }) {
           id, groupId, fromId, toId,
           amount: money(s.amount, 'Amount'),
           at: when(s.at),
-          method: s.method === 'cash' ? 'cash' : 'upi',
           sample: !!s.sample,
         };
         run(

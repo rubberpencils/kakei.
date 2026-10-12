@@ -11,6 +11,8 @@ const native = requireNativeModule<{
   stopMcp: () => Promise<void>;
   mcpReply: (id: string, status: number, body: string) => Promise<void>;
   localAddresses: () => Promise<string[]>;
+  batteryExempt: () => Promise<boolean>;
+  requestBatteryExemption: () => Promise<void>;
   addListener: <K extends keyof Events>(name: K, cb: Events[K]) => { remove: () => void };
 }>('KakieSms');
 
@@ -33,6 +35,15 @@ export function mcpReply(id: string, status: number, body: string) {
 
 export function localAddresses() {
   return native.localAddresses();
+}
+
+/** True when Android will not put the app to sleep to save battery. */
+export function batteryExempt() {
+  return native.batteryExempt();
+}
+
+export function requestBatteryExemption() {
+  return native.requestBatteryExemption();
 }
 
 export function onMcpRequest(cb: (e: McpRequest) => void) {
