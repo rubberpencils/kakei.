@@ -1,5 +1,6 @@
+import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
 import { parseSms } from './parser';
-import { cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn } from './ledger';
+import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
 
@@ -10,6 +11,8 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 const samples: [string, string, Record<string, unknown>][] = [
   ['VM-HDFCBK', 'Rs.1240.00 debited from A/c XX4521 on 28-09-26 to VPA swiggy@icici. UPI Ref 426781234.', { amount: 1240, income: false, rail: 'upi', merchant: 'Swiggy', tag: 'food', account: '4521', bank: 'HDFC' }],
   ['AD-ICICIT', 'INR 3,499.00 spent using ICICI Bank Card XX9012 on 28-Sep-26 on AMAZON PAY IN.', { amount: 3499, income: false, rail: 'credit', merchant: 'Amazon', tag: 'shopping', account: '9012' }],
+  ['VM-HDFCBK', 'Rs.2499.00 spent on HDFC Bank CC XX1234 on 28-09-26 at AMAZON.', { amount: 2499, rail: 'credit', account: '1234' }],
+  ['AX-AXISBK', 'INR 5,000.00 debited from A/c no. XX3308 on 27-09-26 towards HDFC Bank CC XX2207 payment.', { amount: 5000, transfer: true }],
   ['VM-HDFCBK', 'Rs.386.00 debited from A/c XX4521 on 28-09-26 to VPA uber.india@axisbank.', { amount: 386, rail: 'upi', merchant: 'Uber', tag: 'transport' }],
   ['JD-SBIINB', 'Your A/c XX7710 is credited Rs.85,000.00 on 25/09/26 by NEFT-ACME TECHNOLOGIES PVT LTD SALARY SEP26.', { amount: 85000, income: true, rail: 'neft', merchant: 'Acme Technologies', tag: 'salary' }],
   ['VM-HDFCBK', 'Rs.2150.00 debited from A/c XX4521 on 27-09-26 to VPA blinkit.payu@hdfcbank.', { merchant: 'Blinkit', tag: 'groceries', rail: 'upi' }],
@@ -90,6 +93,26 @@ eq(friendsOnly.total, 0, 'a bill paid fully for friends is not your spend');
 eq(friendsOnly.back, 100, 'all of it is coming back');
 eq(spendIn([{ ...cab, reflect: false }], [], 'me', '2026-10-01', '2026-10-31').back, 0, 'hidden splits stay out of personal');
 
+const tripGroup = { id: 'g', name: 'Trip', icon: 'beach', memberIds: ['b'], note: '' };
+const owedBalances = youBalances([cab], [], [tripGroup], 'me');
+eq(owedBalances.owedTotal, 50, 'balances: what friends owe you');
+eq(owedBalances.owed[0].id, 'b', 'balances: names the person who owes you');
+eq(owedBalances.owed[0].lines[0].groupId, 'g', 'balances: names the group it comes from');
+eq(owedBalances.oweTotal, 0, 'balances: nothing owed by you');
+const oweBalances = youBalances([theirs], [], [tripGroup], 'me');
+eq(oweBalances.oweTotal, 40, 'balances: what you owe');
+eq(oweBalances.owe[0].id, 'b', 'balances: names who you owe');
+
+const swipe1: Expense = { ...lunch, id: 'c1', rail: 'credit', amount: 780, account: '9012', bank: 'ICICI', at: '2026-10-01T12:00:00' };
+const swipe2: Expense = { ...swipe1, id: 'c2', amount: 2799, at: '2026-10-02T12:00:00' };
+const cardPay: Expense = { ...lunch, id: 'pay', transfer: true, rail: 'upi', amount: 1000, account: '3308', bank: 'HDFC', at: '2026-10-05T12:00:00' };
+eq(cardBills([swipe1, swipe2], 'me')[0].due, 3579, 'card bill adds up credit card spend by itself');
+eq(cardBills([swipe1, swipe2, cardPay], 'me')[0].due, 2579, 'a card bill payment takes it down');
+eq(cardBills([swipe1, swipe2, { ...cardPay, amount: 3579 }], 'me').length, 0, 'a paid card has no bill');
+eq(cardBills([{ ...cab, id: 'fc', rail: 'credit', payerId: 'b', amount: 500 }], 'me').length, 0, 'a friend\'s card is not your bill');
+eq(cardBills([{ ...cab, id: 'mc', rail: 'credit' }], 'me')[0].due, 100, 'a split you paid by card is the full charge on your card');
+eq(cardBills([lunch], 'me').length, 0, 'cash and UPI are not on a card bill');
+
 const mcpData: McpData = {
   you: { id: 'me', name: 'Me', initials: 'ME' },
   people: [{ id: 'b', name: 'Bela', initials: 'BE' }],
@@ -118,5 +141,51 @@ eq(asked('get_balances').balances[0].net, -20, 'mcp balances read from your side
 eq(asked('get_balances').balances[0].meaning, 'you owe them', 'mcp balances say who pays whom');
 eq(JSON.parse(rpc('tools/call', { name: 'get_summary', arguments: { month: 'oct' } }).body).result.isError, true, 'mcp bad input is a tool error');
 eq(JSON.stringify(JSON.parse(rpc('tools/call', { name: 'list_transactions' }).body)).includes('4521'), false, 'mcp never includes account numbers');
+
+// The in-app keyboard: what each key does to the text.
+const typed = (field: Parameters<typeof applyKey>[0], keys: string) => Array.from(keys).reduce((v, k) => applyKey(field, v, k), '');
+const money = { mode: 'decimal' as const };
+eq(typed(money, '12.509'), '12.50', 'amount stops at two decimals');
+eq(typed(money, '.5'), '0.5', 'a lone dot becomes 0.');
+eq(typed(money, '1.2.3'), '1.23', 'amount takes one dot');
+eq(typed(money, '007'), '7', 'amount drops leading zeros');
+eq(typed(money, 'a1b2'), '12', 'amount ignores letters');
+eq(applyKey(money, '1234567890', '1'), '1234567890', 'amount has a length limit');
+eq(applyKey(money, '12', 'del'), '1', 'delete removes the last digit');
+eq(typed({ mode: 'phone' }, '+91 98a76'), '+919876', 'phone keeps digits and a leading plus');
+eq(typed({ mode: 'number' }, '1.5'), '15', 'whole numbers have no dot');
+eq(typed({ mode: 'text', maxLength: 3 }, 'abcd'), 'abc', 'maxLength is respected');
+eq(applyKey({ mode: 'text', multiline: true }, 'a', 'enter'), 'a\n', 'multiline enter adds a line');
+eq(applyKey({ mode: 'text' }, 'a', 'enter'), 'a', 'single line enter adds nothing');
+eq(shouldCap('words', ''), true, 'words start with a capital');
+eq(shouldCap('words', 'Goa '), true, 'each word gets a capital');
+eq(shouldCap('words', 'Goa'), false, 'mid word stays lower case');
+eq(shouldCap('sentences', 'Hi. '), true, 'sentences restart after a full stop');
+eq(shouldCap('sentences', 'Hi'), false, 'sentences do not restart mid way');
+eq(shouldCap('none', ''), false, 'caps can be off');
+eq(shouldCap('chars', 'AB'), true, 'codes are all capitals');
+eq(pasteInto(money, '', ' ₹1,250.75 '), '1250.75', 'pasting into an amount keeps only the number');
+eq(pasteInto({ mode: 'text' }, 'a', ' b\n c '), 'ab c', 'pasting collapses whitespace on one line');
+
+// The caret can sit anywhere in the text.
+const at = (field: Parameters<typeof editAt>[0], value: string, cursor: number, key: string) => editAt(field, value, cursor, key);
+eq(JSON.stringify(at({ mode: 'text' }, 'helo', 3, 'l')), JSON.stringify({ value: 'hello', cursor: 4 }), 'a letter goes in at the caret');
+eq(JSON.stringify(at({ mode: 'text' }, 'hello', 3, 'del')), JSON.stringify({ value: 'helo', cursor: 2 }), 'delete removes the letter before the caret');
+eq(JSON.stringify(at({ mode: 'text' }, 'hello', 0, 'del')), JSON.stringify({ value: 'hello', cursor: 0 }), 'delete at the start does nothing');
+eq(JSON.stringify(at({ mode: 'text' }, 'a😀b', 2, 'del')), JSON.stringify({ value: 'ab', cursor: 1 }), 'delete takes a whole emoji');
+eq(JSON.stringify(at({ mode: 'text', multiline: true }, 'ab', 1, 'enter')), JSON.stringify({ value: 'a\nb', cursor: 2 }), 'return splits the line at the caret');
+eq(at(money, '150', 1, '2').value, '1250', 'amount takes a digit in the middle');
+eq(at(money, '1250', 2, '.').value, '12.50', 'a dot can go in the middle of an amount');
+eq(at(money, '1250', 1, '.').value, '1250', 'a dot that leaves three decimals is refused');
+eq(at(money, '50', 0, '.').value, '0.50', 'a dot at the start gets a zero in front');
+eq(at(money, '1.5', 0, '.').value, '1.5', 'only one dot per amount');
+eq(at(money, '5', 0, '0').value, '5', 'a zero typed in front of an amount is dropped');
+eq(at({ mode: 'number' }, '9', 0, '0').value, '9', 'a zero typed in front of a number is dropped');
+eq(at({ mode: 'number' }, '10', 1, '0').value, '100', 'a zero in the middle of a number stays');
+eq(at({ mode: 'phone' }, '9876', 2, '+').value, '9876', 'a plus only goes first in a phone number');
+eq(at({ mode: 'phone' }, '9876', 0, '+').value, '+9876', 'a plus can go first in a phone number');
+eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').value, 'abc', 'paste lands at the caret');
+eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').cursor, 2, 'the caret ends after what was pasted');
+eq(clampCursor('abc', 9), 3, 'the caret never passes the end');
 
 console.log('selfcheck ok');

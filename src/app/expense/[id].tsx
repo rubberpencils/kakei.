@@ -27,6 +27,7 @@ export default function ExpenseScreen() {
   }
 
   const group = e.groupId ? store.groups.find((g) => g.id === e.groupId) : null;
+  const realGroups = store.groups.filter((g) => g.kind !== 'split');
   const rem = remainingOwed(store.expenses, store.settlements);
   const you = store.you.id;
   const name = (pid: string) => personName(store.people, store.you, pid);
@@ -61,7 +62,7 @@ export default function ExpenseScreen() {
         <Chip icon={RAIL_ICON[e.rail]} label={RAIL_LABEL[e.rail]} />
         {e.bank && e.account ? <Chip icon="bank-outline" label={`${e.bank} ••${e.account}`} /> : null}
         {e.recurring ? <Chip icon="repeat" label={e.recurring} /> : null}
-        {e.transfer ? <Chip icon="swap-horizontal" label="Card bill, not spend" /> : null}
+        {e.transfer ? <Chip icon="swap-horizontal" label="Card bill payment, not spend" /> : null}
       </View>
 
       <Text style={{ marginTop: 28, marginBottom: 10, fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>TAG</Text>
@@ -125,14 +126,39 @@ export default function ExpenseScreen() {
         </Press>
       ) : null}
 
-      {!group && !e.income ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 26 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>Credit card bill</Text>
-            <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>Paying a card is a transfer, so it is left out of spend.</Text>
-          </View>
-          <Toggle on={e.transfer} onPress={() => store.updateExpense({ ...e, transfer: !e.transfer })} />
-        </View>
+      {!group && !e.income && !e.transfer ? (
+        <>
+          <Press onPress={() => router.push({ pathname: '/new-group', params: { expenseId: e.id } })} style={{ marginTop: 12, padding: 16, borderRadius: 16, backgroundColor: c.sub, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <Icon name="account-multiple-plus-outline" size={22} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>Make a group</Text>
+              <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>For a trip or a flat. This bill becomes its first expense, and you can add more.</Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={c.mut} />
+          </Press>
+          {realGroups.length ? (
+            <>
+              <Text style={{ marginTop: 22, marginBottom: 10, fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>ADD TO A GROUP</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {realGroups.map((g) => (
+                    <Press key={g.id} onPress={() => router.push({ pathname: '/split', params: { expenseId: e.id, groupId: g.id } })} style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: c.line, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Icon name={g.icon} size={16} />
+                      <Text style={{ fontFamily: font.medium, fontSize: 13.5, color: c.fg }}>{g.name}</Text>
+                    </Press>
+                  ))}
+                </View>
+              </ScrollView>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      {e.rail === 'credit' && !e.transfer && !e.income && (!group || e.payerId === you) ? (
+        <Press onPress={() => router.push('/card-bill')} style={{ marginTop: 22, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Icon name="credit-card-clock-outline" size={18} color={c.mut} />
+          <Text style={{ flex: 1, fontFamily: font.body, fontSize: 13, color: c.mut }}>On your card bill. See what is due</Text>
+          <Icon name="chevron-right" size={18} color={c.mut} />
+        </Press>
       ) : null}
       {e.recurring ? (
         <Press

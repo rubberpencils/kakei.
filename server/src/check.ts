@@ -53,8 +53,19 @@ try {
 
   const s1 = await call('GET', '/sync', A);
   eq(s1.json.groups.length, 1, 'a sees group');
-  eq(s1.json.expenses.length, 2, 'a sees both expenses');
-  eq(s1.json.prefs.budget, 50000, 'prefs');
+  eq(s1.json.expenses.length, 1, 'a sees the group expense, and the personal one was never stored');
+  eq(Object.keys(s1.json.prefs).length, 0, 'budget and tags are not kept on the server');
+  eq((db.prepare('select count(*) as n from expenses where id = ?').get('coffee1') as { n: number }).n, 0, 'a personal expense is ignored');
+  eq((db.prepare('select count(*) as n from prefs').get() as { n: number }).n, 0, 'no prefs row is written');
+  const stored = db.prepare('select data from expenses where id = ?').get('dinner1') as { data: string };
+  eq(stored.data.startsWith('enc1:'), true, 'an expense is sealed in the database');
+  eq(stored.data.includes('Dinner'), false, 'the merchant is not readable in the database file');
+  const withCard = await call('POST', '/ops', A, { ops: [{ type: 'expense.upsert', expense: { ...dinner, id: 'card001', account: '4521', bank: 'HDFC' } }] });
+  eq(withCard.json.results[0].ok, true, 'a card spend in a group saves');
+  const card = (await call('GET', '/sync', A)).json.expenses.find((e: any) => e.id === 'card001');
+  eq(card.account, null, 'the account digits are not kept');
+  eq(card.bank, null, 'the bank is not kept');
+  await call('POST', '/ops', A, { ops: [{ type: 'expense.delete', id: 'card001' }] });
   const code = s1.json.groups[0].code as string;
 
   eq((await call('GET', '/sync', B)).json.groups.length, 0, 'b sees nothing before joining');
@@ -67,8 +78,13 @@ try {
   eq(s2.json.expenses[0].shares[bid], 600, 'claimed share');
   eq(s2.json.groups[0].memberIds.includes(aid), true, 'a listed for b');
 
-  const del = await call('POST', '/ops', B, { ops: [{ type: 'expense.delete', id: 'coffee1' }] });
+  db.prepare("insert into expenses (id, owner_id, group_id, data, updated) values ('old001', ?, null, '{}', 1)").run(aid);
+  db.prepare("insert into prefs (user_id, data) values (?, '{}')").run(aid);
+  const del = await call('POST', '/ops', B, { ops: [{ type: 'expense.delete', id: 'old001' }] });
   eq(del.json.results[0].ok, false, 'b cannot delete a personal expense of a');
+  await call('POST', '/ops', A, { ops: [{ type: 'personal.purge' }] });
+  eq((db.prepare('select count(*) as n from expenses where id = ?').get('old001') as { n: number }).n, 0, 'purge clears old personal expenses');
+  eq((db.prepare('select count(*) as n from prefs').get() as { n: number }).n, 0, 'purge clears old prefs');
 
   await call('POST', '/ops', B, {
     ops: [
@@ -117,6 +133,18 @@ try {
   eq(columns.some((col) => col.name === 'vpa'), false, 'no UPI ID column');
 
   eq((await call('GET', '/sync', 'nope')).status, 401, 'bad token');
+  const { makeVault } = await import('./vault.ts');
+  const vault = makeVault(Buffer.alloc(32, 7));
+  const sealed = vault.seal('{"a":1}');
+  eq(vault.open(sealed), '{"a":1}', 'a sealed value opens with the same key');
+  eq(vault.open('{"old":true}'), '{"old":true}', 'a plain legacy value still reads');
+  let wrong = false;
+  try {
+    makeVault(Buffer.alloc(32, 8)).open(sealed);
+  } catch {
+    wrong = true;
+  }
+  eq(wrong, true, 'a sealed value does not open with another key');
   console.log('server check ok');
 } finally {
   server.close();

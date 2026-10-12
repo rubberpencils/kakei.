@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { ScrollView, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { ask, Avatar, Back, buzz, Icon, Press, Toggle, usePalette, Word } from '@/components/ui';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -57,11 +58,12 @@ export default function GroupSettings() {
       <Word size={28}>Group settings</Word>
 
       <Text style={label(c.mut)}>Name</Text>
-      <TextInput
+      <Input
         value={name}
         onChangeText={setName}
-        onEndEditing={saveName}
         onBlur={saveName}
+        label="Group name"
+        caps="words"
         style={{ fontFamily: font.semi, fontSize: 20, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }}
       />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 }}>
@@ -101,13 +103,14 @@ export default function GroupSettings() {
         </Press>
       ))}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
-        <TextInput
+        <Input
           value={who}
           onChangeText={setWho}
           onSubmitEditing={add}
-          submitBehavior="submit"
+          keepFocus
           placeholder="Add someone by name"
-          placeholderTextColor={c.mut}
+          label="Add someone"
+          caps="words"
           style={{ flex: 1, fontFamily: font.body, fontSize: 15, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }}
         />
         <Press onPress={add} disabled={!who.trim()} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center' }}>

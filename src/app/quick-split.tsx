@@ -1,8 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Input } from '@/components/input';
 import { Back, Button, buzz, goBack, Icon, Press, TagPicker, usePalette, Word } from '@/components/ui';
 import { inr, uid } from '@/lib/format';
 import { equalShares, percentShares, round2 } from '@/lib/ledger';
@@ -109,14 +110,15 @@ export default function QuickSplit() {
       <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 6, lineHeight: 19 }}>
         Share one bill with a few people. Only your part counts as your spend.
       </Text>
-      <TextInput value={desc} onChangeText={setDesc} placeholder="What was it for?" placeholderTextColor={c.mut} style={{ marginTop: 16, fontFamily: font.medium, fontSize: 18, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
+      <Input value={desc} onChangeText={setDesc} placeholder="What was it for?" label="What was it for?" caps="sentences" style={{ marginTop: 16, fontFamily: font.medium, fontSize: 18, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
         <Text style={{ fontFamily: font.display, fontSize: 30, color: c.mut }}>₹</Text>
-        <TextInput
+        <Input
           value={amt}
           onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))}
           editable={!fixed}
-          keyboardType="decimal-pad"
+          mode="decimal"
+          label="Amount"
           placeholder="0"
           placeholderTextColor={c.bar}
           style={{ flex: 1, fontFamily: font.display, fontSize: 48, color: c.fg, padding: 0 }}
@@ -130,13 +132,14 @@ export default function QuickSplit() {
         ))}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
-        <TextInput
+        <Input
           value={newName}
           onChangeText={setNewName}
           onSubmitEditing={addNew}
-          submitBehavior="submit"
+          keepFocus
           placeholder="Add someone by name"
-          placeholderTextColor={c.mut}
+          label="Add someone"
+          caps="words"
           style={{ flex: 1, fontFamily: font.body, fontSize: 15, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }}
         />
         <Press onPress={addNew} disabled={!newName.trim()} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center' }}>
@@ -168,11 +171,11 @@ export default function QuickSplit() {
                   <Text style={{ flex: 1, fontFamily: font.medium, color: isOn(m.id) ? c.fg : c.mut }}>{m.name}</Text>
                 </Press>
                 {mode === 'exact' && isOn(m.id) ? (
-                  <TextInput value={exact[m.id] ?? ''} onChangeText={(v) => setExact((s) => ({ ...s, [m.id]: v.replace(/[^0-9.]/g, '') }))} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.mut} style={{ width: 90, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+                  <Input value={exact[m.id] ?? ''} onChangeText={(v) => setExact((s) => ({ ...s, [m.id]: v.replace(/[^0-9.]/g, '') }))} mode="decimal" label={`${m.name}'s share`} placeholder="0" style={{ width: 90, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
                 ) : mode === 'percent' && isOn(m.id) ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>₹{inr(shares[m.id] || 0)}</Text>
-                    <TextInput value={pct[m.id] ?? String(pctOf(m.id))} onChangeText={(v) => setPct((s) => ({ ...s, [m.id]: v.replace(/[^0-9.]/g, '') }))} keyboardType="decimal-pad" style={{ width: 54, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+                    <Input value={pct[m.id] ?? String(pctOf(m.id))} onChangeText={(v) => setPct((s) => ({ ...s, [m.id]: v.replace(/[^0-9.]/g, '') }))} mode="decimal" label={`${m.name}'s percent`} style={{ width: 54, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
                     <Text style={{ fontFamily: font.displaySm, color: c.mut }}>%</Text>
                   </View>
                 ) : (

@@ -151,6 +151,78 @@ export function youNet(debts: Debt[], youId: string) {
   return { owed: round2(owed), owe: round2(owe), net: round2(owed - owe) };
 }
 
+export type BalanceLine = { groupId: string; amount: number };
+export type BalanceRow = { id: string; amount: number; lines: BalanceLine[] };
+
+/**
+ * Who owes you and who you owe, per person, with the group each amount comes from. Each group is worked out on its
+ * own (same as the Home cards), so the totals here are exactly the numbers on those cards.
+ */
+export function youBalances(expenses: Expense[], settlements: Settlement[], groups: Group[], youId: string) {
+  const owed = new Map<string, BalanceRow>();
+  const owe = new Map<string, BalanceRow>();
+  const bump = (map: Map<string, BalanceRow>, id: string, groupId: string, amount: number) => {
+    const row = map.get(id) ?? { id, amount: 0, lines: [] };
+    row.amount = round2(row.amount + amount);
+    row.lines.push({ groupId, amount: round2(amount) });
+    map.set(id, row);
+  };
+  for (const g of groups) {
+    for (const d of groupDebts(expenses, settlements, g)) {
+      if (d.toId === youId) bump(owed, d.fromId, g.id, d.amount);
+      else if (d.fromId === youId) bump(owe, d.toId, g.id, d.amount);
+    }
+  }
+  const list = (m: Map<string, BalanceRow>) =>
+    [...m.values()].map((r) => ({ ...r, lines: r.lines.sort((a, b) => b.amount - a.amount) })).sort((a, b) => b.amount - a.amount);
+  const sum = (rows: BalanceRow[]) => round2(rows.reduce((a, r) => a + r.amount, 0));
+  const o = list(owed);
+  const w = list(owe);
+  return { owed: o, owe: w, owedTotal: sum(o), oweTotal: sum(w) };
+}
+
+export type CardBill = {
+  key: string;
+  bank: string | null;
+  account: string | null;
+  due: number;
+  // Card purchases that make up what is still due, newest first.
+  charges: Expense[];
+  lastPaid: string | null;
+};
+
+/**
+ * What each credit card currently owes. Nothing is tagged by hand: any expense paid with a credit card adds to that
+ * card's bill, and a card bill payment (a transfer) takes it down. A payment goes to the card whose last digits match,
+ * else the card with the most due, since the SMS names the account the money left, not the card.
+ */
+export function cardBills(expenses: Expense[], youId: string): CardBill[] {
+  const cards = new Map<string, CardBill>();
+  const card = (e: Expense) => {
+    const key = e.account ? `${e.bank ?? ''}|${e.account}` : 'card';
+    if (!cards.has(key)) cards.set(key, { key, bank: e.account ? e.bank ?? null : null, account: e.account ?? null, due: 0, charges: [], lastPaid: null });
+    return cards.get(key)!;
+  };
+  const sorted = expenses.filter((e) => !e.income).sort((a, b) => a.at.localeCompare(b.at));
+  for (const e of sorted) {
+    if (e.transfer) {
+      const target = (e.account && cards.get(`${e.bank ?? ''}|${e.account}`)) || [...cards.values()].sort((a, b) => b.due - a.due)[0];
+      if (!target) continue;
+      target.due = round2(Math.max(0, target.due - e.amount));
+      target.lastPaid = e.at;
+      if (target.due < 0.5) target.charges = [];
+      continue;
+    }
+    if (e.rail !== 'credit') continue;
+    // A bill a friend paid on their own card is not on yours.
+    if (e.groupId && e.payerId && e.payerId !== youId) continue;
+    const c = card(e);
+    c.due = round2(c.due + e.amount);
+    c.charges.unshift(e);
+  }
+  return [...cards.values()].filter((c) => c.due >= 0.5).sort((a, b) => b.due - a.due);
+}
+
 export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
   const rem: Record<string, Record<string, number>> = {};
   const groupIds = [...new Set(expenses.map((e) => e.groupId).filter((id): id is string => !!id))];

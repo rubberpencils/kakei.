@@ -15,6 +15,7 @@ import { useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReducedMotion } from 'react-native-reanimated';
 
+import { KeyboardHost } from '@/components/keyboard';
 import { McpHost } from '@/components/mcp-host';
 import { Splash } from '@/components/splash';
 import { ConfirmHost, Toast } from '@/components/ui';
@@ -34,6 +35,7 @@ function Shell() {
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>
       <StatusBar style={splash ? 'light' : 'auto'} />
+      <View style={{ flex: 1 }}>
       {ready ? (
         <Stack
           screenOptions={{
@@ -44,7 +46,7 @@ function Shell() {
         >
           <Stack.Protected guard={entered}>
             <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="add" options={{ presentation: 'modal', animation: reduce ? 'fade' : 'slide_from_bottom' }} />
+            <Stack.Screen name="add" options={{ animation: reduce ? 'fade' : 'slide_from_bottom' }} />
             <Stack.Screen name="review" />
             <Stack.Screen name="split" />
             <Stack.Screen name="quick-split" />
@@ -58,12 +60,17 @@ function Shell() {
             <Stack.Screen name="group-settings" />
             <Stack.Screen name="sms" />
             <Stack.Screen name="search" options={{ animation: reduce ? 'fade' : 'fade_from_bottom' }} />
+            <Stack.Screen name="balances" />
+            <Stack.Screen name="card-bill" />
           </Stack.Protected>
           <Stack.Protected guard={!entered}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
           </Stack.Protected>
         </Stack>
       ) : null}
+      {/* The keyboard sits under the screens, so they shrink to make room for it. */}
+      <KeyboardHost />
+      </View>
       <McpHost />
       <Toast />
       <ConfirmHost />

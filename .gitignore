@@ -37,6 +37,8 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 .tmp-check/
+.build.log
+.tmp-*
 
 example
 

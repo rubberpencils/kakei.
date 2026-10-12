@@ -1,6 +1,6 @@
 import type { Expense, Group, MonthSnapshot, Settlement } from './types';
 
-export const DEFAULT_API = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
+export const DEFAULT_API = process.env.EXPO_PUBLIC_API_URL ?? 'https://kakei.169.58.42.62.sslip.io';
 
 export type Op =
   | { type: 'group.upsert'; group: Pick<Group, 'id' | 'name' | 'icon' | 'note'> & { sample?: boolean; simplify?: boolean; kind?: 'group' | 'split' } }
@@ -11,7 +11,9 @@ export type Op =
   | { type: 'settlement.upsert'; settlement: Settlement }
   | { type: 'settlement.delete'; id: string }
   | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[] } }
-  | { type: 'me.set'; name?: string };
+  | { type: 'me.set'; name?: string }
+  // Asks the server to forget personal data that older versions of the app uploaded.
+  | { type: 'personal.purge' };
 
 export type Queued = Op & { qid: string };
 
@@ -41,6 +43,16 @@ export class ApiError extends Error {
 export function cleanBase(raw: string) {
   const t = raw.trim().replace(/\/+$/, '');
   return /^https?:\/\//.test(t) ? t : `http://${t}`;
+}
+
+/** True when the app is pointed at the hosted Kakei server rather than one someone typed in. */
+export function isOfficial(base: string) {
+  return cleanBase(base).toLowerCase() === cleanBase(DEFAULT_API).toLowerCase();
+}
+
+/** What to call a server on screen. The hosted one is just "Official servers", with no address to read out. */
+export function serverName(base: string) {
+  return isOfficial(base) ? 'Official servers' : base.replace(/^https?:\/\//, '');
 }
 
 export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
