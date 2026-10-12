@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Input } from '@/components/input';
 import { buzz, goBack, Icon, Press, TagPicker, Toggle, usePalette } from '@/components/ui';
 import { localNoon, uid } from '@/lib/format';
-import { useKeyboard } from '@/lib/keyboard';
 import { equalShares } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, RAIL_ICON, RAIL_LABEL } from '@/lib/theme';
@@ -17,7 +16,8 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'];
 export default function Add() {
   const c = usePalette();
   const store = useStore();
-  const { field } = useKeyboard();
+  // The number pad steps aside while the phone's keyboard is up for the note.
+  const [typing, setTyping] = useState(false);
   const [kind, setKind] = useState<'exp' | 'inc'>('exp');
   const [amt, setAmt] = useState('');
   const [note, setNote] = useState('');
@@ -82,7 +82,7 @@ export default function Add() {
   const shown = amt ? Number(amt.split('.')[0] || '0').toLocaleString('en-IN') + (amt.includes('.') ? `.${amt.split('.')[1]}` : '') : '0';
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: field ? 0 : insets.bottom }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: typing ? 0 : insets.bottom }}>
       <View style={{ height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 }}>
         <Press onPress={goBack} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={24} /></Press>
         <View style={{ flexDirection: 'row', backgroundColor: c.sub, borderRadius: 18, padding: 3 }}>
@@ -102,6 +102,8 @@ export default function Add() {
           placeholder="What was it for?"
           label="What was it for?"
           caps="sentences"
+          onFocus={() => setTyping(true)}
+          onBlur={() => setTyping(false)}
           style={{ textAlign: 'center', marginTop: 8, fontFamily: font.medium, fontSize: 16, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.faint, paddingVertical: 8 }}
         />
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 14 }}>
@@ -177,8 +179,8 @@ export default function Add() {
           </View>
         ) : null}
       </ScrollView>
-      <View style={{ borderTopWidth: 1, borderTopColor: c.faint, paddingHorizontal: 16, paddingBottom: field ? 10 : 16 }}>
-        {field ? null : (
+      <View style={{ borderTopWidth: 1, borderTopColor: c.faint, paddingHorizontal: 16, paddingBottom: typing ? 10 : 16 }}>
+        {typing ? null : (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             {KEYS.map((k) => (
               <Press key={k} onPress={() => push(k)} style={{ width: '33.33%', height: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -187,7 +189,7 @@ export default function Add() {
             ))}
           </View>
         )}
-        <Press onPress={save} style={{ marginTop: field ? 10 : 0, height: 52, borderRadius: 26, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center', opacity: Number(amt) > 0 ? 1 : 0.4 }}>
+        <Press onPress={save} style={{ marginTop: typing ? 10 : 0, height: 52, borderRadius: 26, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center', opacity: Number(amt) > 0 ? 1 : 0.4 }}>
           <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 16 }}>{group ? `Save to ${group.name}` : kind === 'inc' ? 'Save income' : 'Save expense'}</Text>
         </Press>
       </View>

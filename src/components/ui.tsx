@@ -507,7 +507,7 @@ export function Field({
         placeholder={placeholder}
         label={label}
         secureTextEntry={secure}
-        mode={keyboard === 'phone-pad' ? 'phone' : keyboard === 'number-pad' ? 'number' : 'text'}
+        mode={keyboard === 'phone-pad' ? 'phone' : keyboard === 'number-pad' ? 'number' : keyboard === 'url' ? 'url' : 'text'}
         caps={auto === 'words' ? 'words' : 'none'}
         style={{ height: 52, borderRadius: 16, borderWidth: 1, borderColor: error ? c.neg : c.line, paddingHorizontal: 16, fontFamily: font.body, fontSize: 16, color: c.fg }}
       />
