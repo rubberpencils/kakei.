@@ -4,6 +4,7 @@ import { ScrollView, Share, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SwipeBody, SwipeTabs } from '@/components/swipe';
 import { ask, Avatar, Back, buzz, Icon, Press, Segmented, SettleRow, timeline, useDark, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { groupDebts, groupTotals, memberNets, pairDebts, personName, reroutes, youNet, type Debt } from '@/lib/ledger';
@@ -12,6 +13,7 @@ import { font, tagColors } from '@/lib/theme';
 import type { Expense, Person, Settlement } from '@/lib/types';
 
 type Tab = 'activity' | 'balances' | 'totals';
+const TABS: readonly Tab[] = ['activity', 'balances', 'totals'];
 
 export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -80,6 +82,7 @@ export default function GroupScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+      <SwipeTabs order={TABS} value={tab} onChange={setTab}>
       <ScrollView
         stickyHeaderIndices={tab === 'activity' ? feed.sticky.map((i) => i + 1) : undefined}
         contentContainerStyle={{ paddingTop: 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 40 }}
@@ -154,7 +157,7 @@ export default function GroupScreen() {
             </View>
           )
         ) : (
-          <Animated.View key={tab} entering={reduce ? undefined : FadeIn.duration(180)}>
+          <SwipeBody k={tab}>
             {tab === 'balances' ? (
               <View style={{ marginTop: 20 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -252,9 +255,10 @@ export default function GroupScreen() {
                 })}
               </View>
             ) : null}
-          </Animated.View>
+          </SwipeBody>
         )}
       </ScrollView>
+      </SwipeTabs>
     </View>
   );
 }

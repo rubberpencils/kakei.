@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SwipeTabs } from '@/components/swipe';
 import { Avatar, Back, Icon, Press, Segmented, timeline, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { friendBalances, personName } from '@/lib/ledger';
@@ -11,6 +12,7 @@ import { font } from '@/lib/theme';
 import type { Expense, Settlement } from '@/lib/types';
 
 type Filter = 'all' | 'shared';
+const FILTERS: readonly Filter[] = ['all', 'shared'];
 type Ev = { kind: 'exp'; at: string; e: Expense } | { kind: 'set'; at: string; s: Settlement };
 
 export default function PersonScreen() {
@@ -53,6 +55,7 @@ export default function PersonScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+      <SwipeTabs order={FILTERS} value={filter} onChange={setFilter}>
       <ScrollView stickyHeaderIndices={feed.sticky.map((i) => i + 1)} contentContainerStyle={{ paddingTop: 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 40 }}>
         <View>
           <Back />
@@ -115,6 +118,7 @@ export default function PersonScreen() {
           </View>
         )}
       </ScrollView>
+      </SwipeTabs>
     </View>
   );
 }

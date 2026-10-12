@@ -1,9 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import Animated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SwipeBody, SwipeTabs } from '@/components/swipe';
 import { Avatar, Icon, Press, Segmented, Word, usePalette } from '@/components/ui';
 import { inr } from '@/lib/format';
 import { friendBalances, groupDebts, personName, youNet } from '@/lib/ledger';
@@ -11,13 +11,13 @@ import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
 
 type Mode = 'groups' | 'splits' | 'friends';
+const MODES: readonly Mode[] = ['groups', 'splits', 'friends'];
 
 export default function Groups() {
   const c = usePalette();
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const reduce = useReducedMotion();
   const [view, setView] = useState<Mode>('groups');
   const real = store.groups.filter((g) => g.kind !== 'split');
   const splits = store.groups.filter((g) => g.kind === 'split');
@@ -35,6 +35,7 @@ export default function Groups() {
   };
 
   return (
+    <SwipeTabs order={MODES} value={view} onChange={setView}>
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 16, paddingHorizontal: 24, paddingBottom: 120 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Word size={28}>Groups</Word>
@@ -59,7 +60,7 @@ export default function Groups() {
         <Segmented<Mode> value={view} onChange={setView} options={[{ id: 'groups', label: 'Groups' }, { id: 'splits', label: 'Splits' }, { id: 'friends', label: 'Friends' }]} />
       </View>
 
-      <Animated.View key={view} entering={reduce ? undefined : FadeIn.duration(180)} style={{ marginTop: 8 }}>
+      <SwipeBody k={view} style={{ marginTop: 8 }}>
         {view === 'splits' ? (
           <Press onPress={() => router.push('/quick-split')} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 }}>
             <View style={{ width: 46, height: 46, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: c.line, alignItems: 'center', justifyContent: 'center' }}>
@@ -121,7 +122,7 @@ export default function Groups() {
                 </Press>
               );
             })}
-      </Animated.View>
+      </SwipeBody>
 
       {store.groups.length === 0 ? (
         <View style={{ marginTop: 40, alignItems: 'flex-start', gap: 10 }}>
@@ -139,6 +140,7 @@ export default function Groups() {
         </View>
       ) : null}
     </ScrollView>
+    </SwipeTabs>
   );
 }
 

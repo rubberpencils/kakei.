@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 
 import { Input } from '@/components/input';
+import { SwipeArea } from '@/components/swipe';
 import { Press, Section, Segmented, SettleRow, TxnRow, Word, useDark, usePalette } from '@/components/ui';
 import { dayKey, inr, monthName, pad } from '@/lib/format';
 import { cashFlow, monthBounds, personName } from '@/lib/ledger';
@@ -107,6 +108,8 @@ export default function Insights() {
   };
 
   return (
+    // Swipe left for the next month or year, right for the one before. Custom ranges have no neighbours.
+    <SwipeArea onStep={(step) => { if (range !== 'custom') shift(step); }}>
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 16, paddingHorizontal: 20, paddingBottom: 120 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 }}>
         <Word size={28}>Insights</Word>
@@ -296,6 +299,7 @@ export default function Insights() {
       ))}
       {merchants.length === 0 ? <Text style={{ fontFamily: font.body, color: c.mut, paddingHorizontal: 4 }}>Nothing yet.</Text> : null}
     </ScrollView>
+    </SwipeArea>
   );
 }
 
