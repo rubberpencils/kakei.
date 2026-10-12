@@ -6,7 +6,7 @@ import { BackHandler, Platform, Pressable, StyleSheet, Text, useColorScheme, Vie
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { blurField, pasteText, submitField, typeKey, useKeyboard, type KeyField } from '@/lib/keyboard';
+import { blurField, moveCursor, pasteText, submitField, typeKey, useKeyboard, type KeyField } from '@/lib/keyboard';
 import { shouldCap } from '@/lib/keyboard-logic';
 import { dark, font, light, type Palette } from '@/lib/theme';
 
@@ -83,6 +83,8 @@ function Toolbar({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
       <Text numberOfLines={1} style={{ flex: 1, fontFamily: font.medium, fontSize: 11.5, letterSpacing: 1, color: pal.mut, textTransform: 'uppercase' }}>
         {cfg.label ?? ''}
       </Text>
+      <Arrow dir={-1} pal={pal} />
+      <Arrow dir={1} pal={pal} />
       {cfg.mode !== 'decimal' ? (
         <Pressable
           onPress={paste}
@@ -107,9 +109,41 @@ function Toolbar({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
   );
 }
 
+// Moves the caret one letter. Hold it to keep going.
+function Arrow({ dir, pal }: { dir: -1 | 1; pal: Palette }) {
+  const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loop = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stop = () => {
+    if (wait.current) clearTimeout(wait.current);
+    if (loop.current) clearInterval(loop.current);
+    wait.current = null;
+    loop.current = null;
+  };
+  useEffect(() => stop, []);
+  return (
+    <Pressable
+      accessibilityLabel={dir < 0 ? 'Move left' : 'Move right'}
+      onPressIn={() => {
+        tick();
+        moveCursor(dir);
+        stop();
+        wait.current = setTimeout(() => {
+          loop.current = setInterval(() => moveCursor(dir), 55);
+        }, 350);
+      }}
+      onPressOut={stop}
+      style={({ pressed }) => ({ width: 36, height: 32, borderRadius: 16, borderWidth: 1, borderColor: pal.line, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? pal.line : 'transparent' })}
+    >
+      <MaterialCommunityIcons name={dir < 0 ? 'chevron-left' : 'chevron-right'} size={22} color={pal.fg} />
+    </Pressable>
+  );
+}
+
 function Keys({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
-  const { value } = useKeyboard();
-  return cfg.mode === 'text' ? <Qwerty cfg={cfg} value={value} pal={pal} /> : <NumPad cfg={cfg} pal={pal} />;
+  const { value, cursor } = useKeyboard();
+  // Capitals depend on what is before the caret, not on the end of the text.
+  const before = Array.from(value).slice(0, cursor).join('');
+  return cfg.mode === 'text' ? <Qwerty cfg={cfg} before={before} pal={pal} /> : <NumPad cfg={cfg} pal={pal} />;
 }
 
 function NumPad({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
@@ -134,11 +168,11 @@ function NumPad({ cfg, pal }: { cfg: KeyField; pal: Palette }) {
 const LETTERS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
 const SYMBOLS = ['1234567890', '-/:;()₹&@"', ".,?!'_#%+"];
 
-function Qwerty({ cfg, value, pal }: { cfg: KeyField; value: string; pal: Palette }) {
+function Qwerty({ cfg, before, pal }: { cfg: KeyField; before: string; pal: Palette }) {
   const [layer, setLayer] = useState<'abc' | 'sym'>('abc');
   const [shift, setShift] = useState<'off' | 'once' | 'lock'>('off');
   const lastShift = useRef(0);
-  const up = shift !== 'off' || shouldCap(cfg.caps, value);
+  const up = shift !== 'off' || shouldCap(cfg.caps, before);
   const rows = layer === 'abc' ? LETTERS : SYMBOLS;
 
   const press = (ch: string) => {

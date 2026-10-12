@@ -8,6 +8,12 @@ export function inr(n: number) {
   return Math.round(Math.abs(n)).toLocaleString('en-IN');
 }
 
+/** Like `inr`, but keeps the paise when there are any. For amounts someone typed, where rounding would be wrong. */
+export function inrExact(n: number) {
+  const v = Math.round(Math.abs(n) * 100) / 100;
+  return v.toLocaleString('en-IN', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 });
+}
+
 export function money(n: number, sign = false) {
   const body = `₹${inr(n)}`;
   if (!sign) return body;

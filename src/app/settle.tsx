@@ -6,10 +6,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '@/components/input';
 import { Avatar, Back, Button, buzz, goBack, Icon, Press, usePalette, Word } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { inrExact } from '@/lib/format';
 import { groupDebts, personName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
+
+// The whole amount owed, to the paisa, so the screen opens ready to confirm in one tap.
+const full = (n: number) => String(Math.round(n * 100) / 100);
 
 // Kakei does not move money. You pay however you like, outside the app, then mark it done here.
 export default function Settle() {
@@ -23,7 +26,7 @@ export default function Settle() {
   const first = debts.find((d) => d.fromId === withId || d.toId === withId) ?? debts[0];
   const [pick, setPick] = useState(first ? `${first.fromId}|${first.toId}` : '');
   const chosen = debts.find((d) => `${d.fromId}|${d.toId}` === pick) ?? first;
-  const [amt, setAmt] = useState(chosen ? String(Math.round(chosen.amount)) : '');
+  const [amt, setAmt] = useState(chosen ? full(chosen.amount) : '');
   const [done, setDone] = useState<null | { line: string; sub: string }>(null);
 
   if (done) {
@@ -59,12 +62,15 @@ export default function Settle() {
   const payee = store.people.find((p) => p.id === other);
   const amount = Number(amt);
 
+  const over = amount > chosen.amount + 0.005;
+  const partial = amount > 0 && !over && amount < chosen.amount - 0.005;
+
   const record = () => {
-    if (!amount) return;
+    if (!(amount > 0) || over) return;
     store.settle({ groupId: group.id, fromId: chosen.fromId, toId: chosen.toId, amount, at: new Date().toISOString() });
     buzz('done');
     setDone({
-      line: `₹${inr(amount)} ${youPay ? `paid to ${otherName}` : `received from ${otherName}`}`,
+      line: `₹${inrExact(amount)} ${youPay ? `paid to ${otherName}` : `received from ${otherName}`}`,
       sub: `${group.name}, marked as done`,
     });
   };
@@ -89,8 +95,8 @@ export default function Settle() {
             const on = key === `${chosen.fromId}|${chosen.toId}`;
             const label = d.fromId === store.you.id ? `To ${personName(store.people, store.you, d.toId)}` : `From ${personName(store.people, store.you, d.fromId)}`;
             return (
-              <Press key={key} onPress={() => { buzz(); setPick(key); setAmt(String(Math.round(d.amount))); }} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
-                <Text style={{ fontFamily: font.medium, color: on ? c.accFg : c.fg, fontSize: 13 }}>{label} ₹{inr(d.amount)}</Text>
+              <Press key={key} onPress={() => { buzz(); setPick(key); setAmt(full(d.amount)); }} style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.medium, color: on ? c.accFg : c.fg, fontSize: 13 }}>{label} ₹{inrExact(d.amount)}</Text>
               </Press>
             );
           })}
@@ -101,16 +107,32 @@ export default function Settle() {
         <Text style={{ fontFamily: font.display, fontSize: 30, color: c.mut }}>₹</Text>
         <Input value={amt} onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))} mode="decimal" label="Amount paid" placeholder="0" style={{ fontFamily: font.display, fontSize: 56, color: c.fg, minWidth: 80, textAlign: 'center' }} />
       </View>
-      {amount > 0 && amount < chosen.amount - 0.5 ? (
-        <Text style={{ fontFamily: font.body, color: c.mut, textAlign: 'center' }}>Partial. ₹{inr(chosen.amount - amount)} stays open.</Text>
-      ) : null}
+      <Text style={{ fontFamily: font.body, fontSize: 13.5, color: over ? c.neg : c.mut, textAlign: 'center', marginTop: 4 }}>
+        {over
+          ? `That is more than the ₹${inrExact(chosen.amount)} owed.`
+          : partial
+            ? `Partial. ₹${inrExact(chosen.amount - amount)} stays open.`
+            : amount > 0
+              ? 'The full amount. Tap the number to pay less.'
+              : 'Enter what was paid.'}
+      </Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+        {[['Full', chosen.amount], ['Half', chosen.amount / 2]].map(([label, v]) => {
+          const on = Math.abs(amount - Number(v)) < 0.005;
+          return (
+            <Press key={String(label)} onPress={() => { buzz(); setAmt(full(Number(v))); }} style={{ height: 32, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: on ? c.acc : c.line, backgroundColor: on ? c.acc : 'transparent', justifyContent: 'center' }}>
+              <Text style={{ fontFamily: font.medium, fontSize: 13, color: on ? c.accFg : c.fg }}>{label} ₹{inrExact(Number(v))}</Text>
+            </Press>
+          );
+        })}
+      </View>
 
       <View style={{ flex: 1 }} />
 
       <Text style={{ fontFamily: font.body, fontSize: 13, lineHeight: 19, color: c.mut, textAlign: 'center', marginBottom: 16 }}>
         {youPay ? `Pay ${otherName} however you like, then mark it here.` : `Mark it once ${otherName} has paid you.`}
       </Text>
-      <Button label={youPay ? 'Mark as paid' : 'Mark as received'} onPress={record} disabled={!(amount > 0)} />
+      <Button label={`Mark ₹${inrExact(amount > 0 ? amount : 0)} as ${youPay ? 'paid' : 'received'}`} onPress={record} disabled={!(amount > 0) || over} />
     </View>
   );
 }

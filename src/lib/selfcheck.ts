@@ -1,4 +1,4 @@
-import { applyKey, pasteInto, shouldCap } from './keyboard-logic';
+import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
 import { parseSms } from './parser';
 import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
@@ -164,5 +164,26 @@ eq(shouldCap('none', ''), false, 'caps can be off');
 eq(shouldCap('chars', 'AB'), true, 'codes are all capitals');
 eq(pasteInto(money, '', ' ₹1,250.75 '), '1250.75', 'pasting into an amount keeps only the number');
 eq(pasteInto({ mode: 'text' }, 'a', ' b\n c '), 'ab c', 'pasting collapses whitespace on one line');
+
+// The caret can sit anywhere in the text.
+const at = (field: Parameters<typeof editAt>[0], value: string, cursor: number, key: string) => editAt(field, value, cursor, key);
+eq(JSON.stringify(at({ mode: 'text' }, 'helo', 3, 'l')), JSON.stringify({ value: 'hello', cursor: 4 }), 'a letter goes in at the caret');
+eq(JSON.stringify(at({ mode: 'text' }, 'hello', 3, 'del')), JSON.stringify({ value: 'helo', cursor: 2 }), 'delete removes the letter before the caret');
+eq(JSON.stringify(at({ mode: 'text' }, 'hello', 0, 'del')), JSON.stringify({ value: 'hello', cursor: 0 }), 'delete at the start does nothing');
+eq(JSON.stringify(at({ mode: 'text' }, 'a😀b', 2, 'del')), JSON.stringify({ value: 'ab', cursor: 1 }), 'delete takes a whole emoji');
+eq(JSON.stringify(at({ mode: 'text', multiline: true }, 'ab', 1, 'enter')), JSON.stringify({ value: 'a\nb', cursor: 2 }), 'return splits the line at the caret');
+eq(at(money, '150', 1, '2').value, '1250', 'amount takes a digit in the middle');
+eq(at(money, '1250', 2, '.').value, '12.50', 'a dot can go in the middle of an amount');
+eq(at(money, '1250', 1, '.').value, '1250', 'a dot that leaves three decimals is refused');
+eq(at(money, '50', 0, '.').value, '0.50', 'a dot at the start gets a zero in front');
+eq(at(money, '1.5', 0, '.').value, '1.5', 'only one dot per amount');
+eq(at(money, '5', 0, '0').value, '5', 'a zero typed in front of an amount is dropped');
+eq(at({ mode: 'number' }, '9', 0, '0').value, '9', 'a zero typed in front of a number is dropped');
+eq(at({ mode: 'number' }, '10', 1, '0').value, '100', 'a zero in the middle of a number stays');
+eq(at({ mode: 'phone' }, '9876', 2, '+').value, '9876', 'a plus only goes first in a phone number');
+eq(at({ mode: 'phone' }, '9876', 0, '+').value, '+9876', 'a plus can go first in a phone number');
+eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').value, 'abc', 'paste lands at the caret');
+eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').cursor, 2, 'the caret ends after what was pasted');
+eq(clampCursor('abc', 9), 3, 'the caret never passes the end');
 
 console.log('selfcheck ok');

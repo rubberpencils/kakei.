@@ -521,7 +521,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(account ? { account, bank } : {}),
           },
         }]);
-        flash('Card bill marked paid');
+        flash('Card payment saved');
       },
       updateGroup: (id, patch) => {
         const g = cur.current.groups.find((x) => x.id === id);

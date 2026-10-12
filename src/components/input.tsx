@@ -1,12 +1,13 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useId, useRef } from 'react';
-import { Pressable, StyleSheet, Text, useColorScheme, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, Text, useColorScheme, View, type GestureResponderEvent, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import Animated, { cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 
 import {
   blurField,
   focusField,
   registerField,
+  setCursor,
   syncValue,
   unregisterField,
   useKeyboard,
@@ -49,7 +50,7 @@ function split(style: TextStyle) {
 
 /**
  * A text field that types with Kakei's own keyboard instead of the system one. It draws the text and a caret itself,
- * so it looks the same on every phone. Typing always happens at the end of the text.
+ * so it looks the same on every phone. Tap to put the caret between letters, or use the arrow keys above the keyboard.
  */
 export function Input(props: InputProps) {
   const {
@@ -58,7 +59,7 @@ export function Input(props: InputProps) {
   } = props;
   const id = useId();
   const pal = useColorScheme() === 'dark' ? dark : light;
-  const { field } = useKeyboard();
+  const { field, cursor } = useKeyboard();
   const focused = field?.id === id;
   const was = useRef(false);
   const latest = useRef(props);
@@ -84,10 +85,25 @@ export function Input(props: InputProps) {
   // Leaving the screen closes the keyboard, so it never hangs around over a screen with nothing to type into.
   useFocusEffect(useCallback(() => () => blurField(id), [id]));
 
-  const open = useCallback(() => {
+  const open = useCallback((cursor?: number) => {
     if (!editable) return;
-    focusField({ id, mode, caps, label: label ?? placeholder, multiline, maxLength }, value, keepFocus);
+    focusField({ id, mode, caps, label: label ?? placeholder, multiline, maxLength }, value, keepFocus, cursor);
   }, [editable, id, mode, caps, label, placeholder, multiline, maxLength, value, keepFocus]);
+
+  const rowRef = useRef<View>(null);
+  // A tap puts the caret between the letters nearest the finger. Letters are not all the same width, so on a long line
+  // this lands within a letter or two, and the arrow keys finish the job.
+  const press = (e: GestureResponderEvent) => {
+    if (!editable) return;
+    const count = Array.from(value).length;
+    const place = (at: number) => (focused ? setCursor(at) : open(at));
+    if (!count || multiline || !rowRef.current) return focused ? undefined : open();
+    const pageX = e.nativeEvent.pageX;
+    rowRef.current.measureInWindow((x, _y, w) => {
+      const f = w > 0 ? (pageX - x) / w : 1;
+      place(Math.round(Math.max(0, Math.min(1, f)) * count));
+    });
+  };
 
   useEffect(() => {
     if (autoFocus && editable) {
@@ -104,6 +120,12 @@ export function Input(props: InputProps) {
   const align = text.textAlign;
   const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
   const shown = secureTextEntry ? '•'.repeat(Array.from(value).length) : value;
+  // The text either side of the caret. A space next to the caret becomes a no-break space so it keeps its width.
+  const glyphs = Array.from(shown);
+  const at = focused ? Math.min(cursor, glyphs.length) : glyphs.length;
+  const solid = (s: string) => s.replace(/^ +| +$/g, (m) => '\u00A0'.repeat(m.length));
+  const before = solid(glyphs.slice(0, at).join(''));
+  const after = solid(glyphs.slice(at).join(''));
   const textColor = text.color ?? pal.fg;
   const hint = placeholderTextColor ?? pal.mut;
 
@@ -117,23 +139,29 @@ export function Input(props: InputProps) {
   return (
     <Pressable
       accessibilityLabel={label ?? placeholder}
-      onPress={open}
+      onPress={press}
       style={[{ minHeight: Math.ceil(size * 1.45), justifyContent: 'center' }, box, ring, !editable && { opacity: 0.6 }]}
     >
       {multiline ? (
         <Text style={[text, { textAlign: align ?? 'left' }]}>
-          {shown ? shown : <Text style={{ color: hint }}>{placeholder}</Text>}
+          {shown ? before : <Text style={{ color: hint }}>{placeholder}</Text>}
           {focused ? <Text style={{ color: pal.brand }}>|</Text> : null}
+          {after}
         </Text>
       ) : (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: justify }}>
-          {focused && !value ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
-          {value ? (
-            <Text numberOfLines={1} ellipsizeMode="head" style={[text, { flexShrink: 1, color: textColor }]}>{shown}</Text>
-          ) : (
-            <Text numberOfLines={1} style={[text, { flexShrink: 1, color: hint, fontFamily: text.fontFamily ?? font.body }]}>{placeholder ?? ''}</Text>
-          )}
-          {focused && value ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
+          <View ref={rowRef} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+            {focused && !value ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
+            {value ? (
+              <>
+                {before ? <Text numberOfLines={1} ellipsizeMode="head" style={[text, { flexShrink: 1, color: textColor }]}>{before}</Text> : null}
+                {focused ? <Caret height={Math.ceil(size * 1.15)} color={pal.brand} /> : null}
+                {after ? <Text numberOfLines={1} style={[text, { flexShrink: 1, color: textColor }]}>{after}</Text> : null}
+              </>
+            ) : (
+              <Text numberOfLines={1} style={[text, { flexShrink: 1, color: hint, fontFamily: text.fontFamily ?? font.body }]}>{placeholder ?? ''}</Text>
+            )}
+          </View>
         </View>
       )}
     </Pressable>
