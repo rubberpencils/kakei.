@@ -93,7 +93,7 @@ async function readBody(req: IncomingMessage): Promise<Row> {
 // A stolen token stops working after this long. People sign in again.
 const SESSION_MS = 90 * 24 * 3600 * 1000;
 
-export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer }) {
+export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; everyonePro?: boolean }) {
   // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
   const vault = makeVault(opts.key ?? randomBytes(32));
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
@@ -117,6 +117,10 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer }
       if (!vault.isSealed(r.data)) run(`update ${table} set data = ? where id = ?`, vault.seal(r.data), r.id);
     }
   }
+
+  // The paywall lives here, never in the app. A self-hosted server makes everyone pro; the hosted one turns that off.
+  // ponytail: pro_until is set by hand for now; a store or payment webhook writes it when billing exists.
+  const isPro = (uid: string) => !!opts.everyonePro || (one('select pro_until from users where id = ?', uid)?.pro_until ?? 0) > Date.now();
 
   const membersOf = (groupId: string) =>
     new Set(all('select person_id from members where group_id = ?', groupId).map((r) => r.person_id as string));
@@ -212,6 +216,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer }
     const settlements = all(`select data from settlements where group_id in (${mine})`, uid).map((r) => JSON.parse(vault.open(r.data)));
     return {
       you: user,
+      pro: isPro(uid),
       people: people.map((p) => ({ id: p.id, name: p.name, claimed: !!p.user_id })),
       groups: groups.map((g) => ({
         id: g.id,

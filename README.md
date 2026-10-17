@@ -113,7 +113,7 @@ npm run server
 
 Listens on `0.0.0.0:4000`. The log line `phone URL:` is the address a phone on the same Wi-Fi should use. Reload on changes with `npm --prefix server run dev`.
 
-Settings are in `server/.env.example`. Set `KAKEI_DATA_KEY` so the data key never sits beside the database. Without it the server makes `data.key` next to the database, and you must keep a copy.
+Settings are in `server/.env.example`. Set `KAKEI_DATA_KEY` so the data key never sits beside the database. Without it the server makes `data.key` next to the database, and you must keep a copy. Every account on a self-hosted server is pro. The hosted server sets `KAKEI_EVERYONE_PRO=false` and decides pro per account. The app has no paywall of its own.
 
 ### 3. Start the app
 
