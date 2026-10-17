@@ -69,6 +69,9 @@ export function openDb(path: string) {
   const cols = db.prepare('pragma table_info(groups)').all() as { name: string }[];
   if (!cols.some((col) => col.name === 'simplify')) db.exec('alter table groups add column simplify integer not null default 1');
   if (!cols.some((col) => col.name === 'kind')) db.exec("alter table groups add column kind text not null default 'group'");
+  // Paid until this time (ms). Null means free. Only read when the server does not make everyone pro.
+  const userCols = db.prepare('pragma table_info(users)').all() as { name: string }[];
+  if (!userCols.some((col) => col.name === 'pro_until')) db.exec('alter table users add column pro_until integer');
   // Kakei no longer stores UPI IDs. Drop the columns an older version created so nothing stays behind.
   for (const table of ['users', 'people']) {
     const has = (db.prepare(`pragma table_info(${table})`).all() as { name: string }[]).some((col) => col.name === 'vpa');

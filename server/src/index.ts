@@ -12,7 +12,12 @@ const dbPath = process.env.DB_PATH ?? './data/kakei.db';
 
 mkdirSync(dirname(dbPath), { recursive: true });
 
-const server = createApp(openDb(dbPath), { cors: process.env.CORS_ORIGIN ?? '*', key: loadKey(dbPath) });
+const server = createApp(openDb(dbPath), {
+  cors: process.env.CORS_ORIGIN ?? '*',
+  key: loadKey(dbPath),
+  // On unless set to false. Self-hosters get everything; the hosted server sets KAKEI_EVERYONE_PRO=false.
+  everyonePro: process.env.KAKEI_EVERYONE_PRO !== 'false',
+});
 
 server.listen(port, host, () => {
   console.log(`kakei. server listening on ${host}:${port}, db ${dbPath}`);

@@ -55,6 +55,11 @@ try {
   eq(s1.json.groups.length, 1, 'a sees group');
   eq(s1.json.expenses.length, 1, 'a sees the group expense, and the personal one was never stored');
   eq(Object.keys(s1.json.prefs).length, 0, 'budget and tags are not kept on the server');
+  eq(s1.json.pro, false, 'free unless the server makes everyone pro');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, aid);
+  eq((await call('GET', '/sync', A)).json.pro, true, 'pro until a future time');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() - 1, aid);
+  eq((await call('GET', '/sync', A)).json.pro, false, 'pro ends when it expires');
   eq((db.prepare('select count(*) as n from expenses where id = ?').get('coffee1') as { n: number }).n, 0, 'a personal expense is ignored');
   eq((db.prepare('select count(*) as n from prefs').get() as { n: number }).n, 0, 'no prefs row is written');
   const stored = db.prepare('select data from expenses where id = ?').get('dinner1') as { data: string };
