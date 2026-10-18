@@ -1,12 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
-import { openBackup, sealBackup } from './backup';
+import { openBackup, sealBackup, type BackupPayload } from './backup';
 import { initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares, friendBalances, monthBounds, personName, spendIn, tagSpend, whyYouPay } from './ledger';
-import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
+import { cleanMerchant, guessRail, parseWithRules, readMoney, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
 import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
 import { handleMcp } from './mcp';
@@ -14,6 +15,7 @@ import { showNote } from './notify';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
 
 const KEY = 'kakie.v2';
+const PASS = 'kakei.backupPass';
 
 // Developer options. They live only on this phone and are never synced.
 export type DevSettings = {
@@ -75,7 +77,7 @@ const FRESH: Local = {
   groups: [],
   expenses: [],
   settlements: [],
-  tags: TAGS,
+  tags: [],
   budget: 0,
   history: [],
   tagBudgets: {},
@@ -100,6 +102,46 @@ const FRESH: Local = {
   nudgeDay: '',
   nudgeStamp: '',
 };
+
+function ledgerOf(x: Local): BackupPayload {
+  return {
+    expenses: x.expenses, settlements: x.settlements, groups: x.groups, people: x.people,
+    budget: x.budget, tags: x.tags, rules: x.rules, history: x.history, tagBudgets: x.tagBudgets,
+  };
+}
+
+/** Local rows win on the same id. A new phone has none, so the backup fills it. */
+function absorb(cur: Local, data: BackupPayload): Local {
+  const personal = new Map<string, Expense>();
+  for (const e of (data.expenses ?? []).filter((e) => !e.groupId)) personal.set(e.id, e);
+  for (const e of cur.expenses.filter((e) => !e.groupId)) personal.set(e.id, e);
+  const groups = [...cur.groups];
+  for (const g of data.groups ?? []) if (!groups.some((h) => h.id === g.id)) groups.push(g);
+  const people = [...cur.people];
+  for (const p of data.people ?? []) if (p.id !== cur.you.id && !people.some((h) => h.id === p.id)) people.push(p);
+  const settlements = [...cur.settlements];
+  for (const s of data.settlements ?? []) if (!settlements.some((h) => h.id === s.id)) settlements.push(s);
+  const groupExpenses = [
+    ...cur.expenses.filter((e) => e.groupId),
+    ...(data.expenses ?? []).filter((e) => e.groupId && !cur.expenses.some((h) => h.id === e.id)),
+  ];
+  return {
+    ...cur,
+    expenses: [...personal.values(), ...groupExpenses],
+    groups,
+    people,
+    settlements,
+    budget: cur.budget || data.budget || 0,
+    tags: [...new Set([...cur.tags, ...(data.tags ?? [])])],
+    rules: cur.rules.length ? cur.rules : (data.rules ?? []),
+    history: cur.history.length ? cur.history : (data.history ?? []),
+    tagBudgets: { ...(data.tagBudgets ?? {}), ...cur.tagBudgets },
+  };
+}
+
+async function pushBackup(x: Local, password: string) {
+  await call(x.base, x.token, 'POST', '/backup', await sealBackup(ledgerOf(x), password));
+}
 
 type SmsIn = { sender: string; body: string; date: number; id?: string };
 type NewExpense = Omit<Expense, 'id' | 'sample'> & { sample?: boolean };
@@ -264,6 +306,29 @@ function rebase(s: Local, r: Remote): Local {
   return due.length ? enqueue(next, due.map((expense) => ({ type: 'expense.upsert', expense }))) : next;
 }
 
+function reparseQueue(s: Local): Local {
+  let changed = false;
+  const queue = s.queue.map((d) => {
+    if (d.amount > 0) return d;
+    const parsed = parseWithRules(d.sender, d.body, s.formats, s.rules);
+    if (!parsed) return d;
+    changed = true;
+    return {
+      ...d,
+      bank: parsed.bank,
+      amount: parsed.amount,
+      income: parsed.income,
+      transfer: parsed.transfer,
+      merchant: parsed.merchant,
+      rail: parsed.rail,
+      tag: parsed.tag,
+      account: parsed.account,
+      at: parsed.at ?? d.at,
+    };
+  });
+  return changed ? { ...s, queue } : s;
+}
+
 function draftFrom(sender: string, body: string, at: string, key: string, rules: MerchantRule[], formats: FormatRule[], id?: string): Draft | null {
   const parsed = parseWithRules(sender, body, formats, rules);
   if (!parsed) {
@@ -318,7 +383,7 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   flash: (m: string) => void;
   setBase: (raw: string) => Promise<string | null>;
   requestCode: (phone: string, purpose: 'signup' | 'reset') => Promise<string | null>;
-  signUp: (name: string, phone: string, password: string, code: string) => Promise<string | null>;
+  signUp: (name: string, phone: string, password: string) => Promise<string | null>;
   signIn: (phone: string, password: string) => Promise<string | null>;
   resetPassword: (phone: string, code: string, password: string) => Promise<string | null>;
   startLocal: (name: string) => void;
@@ -389,6 +454,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState('');
   const [sync, setSync] = useState<SyncState>('idle');
   const cur = useRef(s);
+  const passRef = useRef<string | null>(null);
+  const holdBackup = useRef(false);
+  const [passOn, setPassOn] = useState(false);
   const busy = useRef(false);
   const again = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -398,6 +466,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [s]);
 
   useEffect(() => {
+    SecureStore.getItemAsync(PASS).then((p) => {
+      if (!p) return;
+      passRef.current = p;
+      setPassOn(true);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !s.token || !passOn || holdBackup.current || !passRef.current) return;
+    const password = passRef.current;
+    const timer = setTimeout(() => {
+      const x = cur.current;
+      if (!x.token || holdBackup.current) return;
+      pushBackup(x, password).catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [ready, s.token, passOn, s.expenses, s.groups, s.settlements, s.people, s.budget, s.tags, s.rules, s.history, s.tagBudgets]);
+
+  useEffect(() => {
     AsyncStorage.getItem(KEY)
       .then((raw) => {
         if (!raw) return;
@@ -405,7 +492,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         saved.dev = { ...FRESH.dev, ...saved.dev };
         // An older build saved localhost as the server. Without an account there, move to the real server.
         if (!saved.token && isLocalHost(saved.base) && !isLocalHost(DEFAULT_API)) saved.base = DEFAULT_API;
-        setS(saved);
+        // Older builds shipped a fixed tag list. Drop any of those the user never put on an expense or a budget.
+        if (saved.tags.length === TAGS.length && saved.tags.every((t, i) => t === TAGS[i])) {
+          const used = new Set<string>();
+          for (const e of saved.expenses) if (e.tag) used.add(e.tag);
+          for (const q of saved.queue) if (q.tag) used.add(q.tag);
+          for (const [t, n] of Object.entries(saved.tagBudgets)) if (n > 0) used.add(t);
+          saved.tags = [...used];
+        }
+        setS(reparseQueue(saved));
       })
       .catch(() => {})
       .finally(() => setReady(true));
@@ -493,30 +588,67 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    const dropPass = () => {
+      passRef.current = null;
+      setPassOn(false);
+      SecureStore.deleteItemAsync(PASS).catch(() => {});
+    };
+
     const authed = async (path: string, body: Record<string, string>) => {
-      const base = cur.current.base;
+      const before = cur.current;
       try {
-        const res = await call<{ token: string; you: Remote['you'] }>(base, null, 'POST', path, body);
-        setS((x) => {
-          if (x.local) {
-            const mine = remapYou(x, res.you.id);
-            const connected: Local = {
-              ...mine, base, token: res.token, you: person(res.you.id, res.you.name), phone: res.you.phone,
-              local: false, connecting: false, outbox: [],
-            };
-            return enqueue(connected, snapshotOps(connected));
-          }
-          const same = x.you.id === res.you.id;
-          return {
-            ...(same ? x : { ...FRESH, queue: x.queue, seen: x.seen, smsOn: x.smsOn, rules: x.rules, formats: x.formats, recent: x.recent }),
-            base,
+        const res = await call<{ token: string; you: Remote['you'] }>(before.base, null, 'POST', path, body);
+        let next: Local;
+        if (before.local) {
+          const mine = remapYou(before, res.you.id);
+          const connected: Local = {
+            ...mine, base: before.base, token: res.token, you: person(res.you.id, res.you.name), phone: res.you.phone,
+            local: false, connecting: false, outbox: [],
+          };
+          next = enqueue(connected, snapshotOps(connected));
+        } else {
+          const same = before.you.id === res.you.id;
+          next = {
+            ...(same ? before : { ...FRESH, queue: before.queue, seen: before.seen, smsOn: before.smsOn, rules: before.rules, formats: before.formats, recent: before.recent, dev: before.dev }),
+            base: before.base,
             token: res.token,
             you: person(res.you.id, res.you.name),
             phone: res.you.phone,
           };
-        });
+        }
+        const password = body.password;
+        holdBackup.current = true;
+        let opened = false;
+        let missing = false;
+        if (password) {
+          try {
+            const packed = await call<{ wrap: string; blob: string }>(before.base, res.token, 'GET', '/backup');
+            next = absorb(next, await openBackup(packed.wrap, packed.blob, password));
+            opened = true;
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 404) missing = true;
+          }
+        }
+        cur.current = next;
+        setS(next);
+        const empty = !next.expenses.length && !next.groups.length;
+        if (password) {
+          passRef.current = password;
+          setPassOn(true);
+          SecureStore.setItemAsync(PASS, password).catch(() => {});
+          // A blob sealed with some other password is left alone when this phone has nothing to replace it with.
+          if (opened || missing || !empty) {
+            try {
+              await pushBackup(next, password);
+            } catch {
+              /* Not Pro yet, or offline. The watcher retries after the next change. */
+            }
+          }
+        }
+        holdBackup.current = false;
         return null;
       } catch (err) {
+        holdBackup.current = false;
         return err instanceof Error ? err.message : 'Something went wrong';
       }
     };
@@ -553,7 +685,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return err instanceof Error ? err.message : 'Could not send the code';
         }
       },
-      signUp: (name, phone, password, code) => authed('/auth/signup', { name, phone, password, code }),
+      signUp: (name, phone, password) => authed('/auth/signup', { name, phone, password }),
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
       resetPassword: async (phone, code, password) => {
         try {
@@ -618,6 +750,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteAccount: async (password) => {
         try {
           await call(cur.current.base, cur.current.token, 'POST', '/account/delete', { password });
+          dropPass();
           signOutLocal();
           return null;
         } catch (err) {
@@ -626,6 +759,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       signOut: () => {
         const { base, token } = cur.current;
+        dropPass();
         if (token) {
           call(base, token, 'POST', '/auth/logout').catch(() => {});
           signOutLocal();
@@ -783,30 +917,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       teach: (id, amountSlice, merchantSlice) => {
         const x = cur.current;
         const d = x.queue.find((q) => q.id === id);
-        const amount = d ? spanContext(d.body, amountSlice) : null;
-        const merchant = d ? spanContext(d.body, merchantSlice) : null;
-        if (!d || !amount || !merchant) return false;
+        const amount = d && amountSlice ? spanContext(d.body, amountSlice) : null;
+        const money = amountSlice ? readMoney(amountSlice) : null;
+        if (!d || !amount || !money) return false;
+        const merchant = merchantSlice ? spanContext(d.body, merchantSlice) : null;
         const formats = [
           ...x.formats.filter((f) => f.sender !== d.sender),
-          { sender: d.sender, amountBefore: amount.before, amountAfter: amount.after, merchantBefore: merchant.before, merchantAfter: merchant.after },
+          {
+            sender: d.sender,
+            amountBefore: amount.before,
+            amountAfter: amount.after,
+            merchantBefore: merchant?.before ?? '',
+            merchantAfter: merchant?.after ?? '',
+          },
         ];
         const parsed = parseWithRules(d.sender, d.body, formats, x.rules);
-        if (!parsed || parsed.amount <= 0) {
-          setS((y) => ({ ...y, formats }));
-          return false;
-        }
+        const amountN = parsed?.amount || money;
+        const merchantName = merchantSlice
+          ? cleanMerchant(merchantSlice)
+          : (parsed?.merchant && parsed.merchant !== 'Payment' ? parsed.merchant : 'Payment');
         setS((y) => ({
           ...y,
           formats,
           queue: y.queue.map((q) => q.id === id ? {
             ...q,
-            bank: parsed.bank,
-            amount: parsed.amount,
-            merchant: parsed.merchant,
-            tag: parsed.tag,
-            rail: parsed.rail,
-            at: parsed.at ?? q.at,
-            account: parsed.account,
+            bank: parsed?.bank ?? q.bank,
+            amount: amountN,
+            merchant: merchantName,
+            tag: parsed?.tag ?? q.tag,
+            rail: parsed?.rail ?? guessRail(d.body),
+            at: parsed?.at ?? q.at,
+            account: parsed?.account ?? q.account,
           } : q),
         }));
         return true;
@@ -962,7 +1103,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         for (const expense of data.expenses) ops.push({ type: 'expense.upsert', expense });
         for (const settlement of data.settlements) ops.push({ type: 'settlement.upsert', settlement });
-        ops.push({ type: 'prefs.set', prefs: { history: [...x.history.filter((h) => !h.sample), ...data.history], ...(x.budget ? {} : { budget: data.budget }) } });
+        const sampleTags = [...new Set([...data.expenses.map((e) => e.tag), ...data.queue.map((q) => q.tag)].filter((t): t is string => !!t))];
+        ops.push({ type: 'prefs.set', prefs: { history: [...x.history.filter((h) => !h.sample), ...data.history], tags: [...new Set([...x.tags, ...sampleTags])], ...(x.budget ? {} : { budget: data.budget }) } });
         setS((y) => ({ ...enqueue(y, ops), queue: [...y.queue.filter((q) => !q.sample), ...data.queue] }));
         flash('Sample data added');
       },

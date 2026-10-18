@@ -206,9 +206,15 @@ export default function Developer() {
               </View>
               <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, marginTop: 12 }}>{`${store.base}/m/${store.dev.remoteId}`}</Text>
               {store.dev.remoteToken ? (
-                <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, marginTop: 8 }}>{store.dev.remoteToken}</Text>
+                <>
+                  <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, marginTop: 8 }}>{store.dev.remoteToken}</Text>
+                  <Press onPress={() => copy(JSON.stringify({ mcpServers: { kakei: { url: `${store.base}/m/${store.dev.remoteId}`, headers: { Authorization: `Bearer ${store.dev.remoteToken}` } } } }, null, 2), 'Config')} style={{ marginTop: 14, height: 42, paddingHorizontal: 18, borderRadius: 21, backgroundColor: c.acc, flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}>
+                    <Icon name="content-copy" size={16} color={c.accFg} />
+                    <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 14 }}>Copy MCP config</Text>
+                  </Press>
+                </>
               ) : (
-                <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8 }}>The token was shown on the phone that created it.</Text>
+                <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8 }}>The token was shown on the phone that created it. Regenerate to copy a config with the bearer token.</Text>
               )}
               <Press onPress={() => ask({
                 title: 'Replace the remote token?',

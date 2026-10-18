@@ -80,7 +80,28 @@ function merchantFrom(body: string) {
   if (on) return cleanMerchant(on[1]);
   const towards = body.match(/towards\s+(.+?)(?:\s+payment|\.|$)/i);
   if (towards) return cleanMerchant(towards[1].replace(/\bXX\d+\b/gi, ''));
+  const to = body.match(/\bto\s+([A-Za-z][A-Za-z0-9.&'-]{1,24})/i);
+  if (to && !/^vpa$/i.test(to[1])) return cleanMerchant(to[1]);
   return 'Payment';
+}
+
+/** First rupee amount in a chip or a line. A date or a long ref does not count. */
+export function readMoney(text: string): number | null {
+  const m = text.match(/(?:(?:rs\.?|inr|₹)\s*)([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?)|([0-9]+\.[0-9]{2})(?!\d)/i);
+  const raw = m?.[1] || m?.[2] || m?.[3];
+  if (!raw) return null;
+  const n = Number(raw.replace(/,/g, ''));
+  return n > 0 ? n : null;
+}
+
+export function guessRail(body: string, transfer = false): Rail {
+  if (!transfer && /\sCC\s/.test(body)) return 'credit';
+  if (/vpa\b|\bupi\b|@[a-z]{2,}/i.test(body) && !/spent using/i.test(body)) return 'upi';
+  if (/spent using|credit card/i.test(body) && !transfer) return 'credit';
+  if (/\bimps\b/i.test(body)) return 'imps';
+  if (/\bneft\b|\brtgs\b/i.test(body)) return 'neft';
+  if (/\bdebit card\b/i.test(body)) return 'debit';
+  return 'debit';
 }
 
 function suggestTag(merchant: string, income: boolean, transfer: boolean) {
@@ -113,24 +134,17 @@ export function parseSms(sender: string, body: string): ParsedSms | null {
   if (!amount || amount <= 0) return null;
 
   const credited = /\b(credited|credit of|received|deposited)\b/i.test(body);
-  const debited = /\b(debited|spent|withdrawn|purchase|paid)\b/i.test(body);
+  const debited = /\b(debited|spent|withdrawn|purchase|paid|sent|transferred)\b/i.test(body);
   if (!credited && !debited) return null;
   const income = credited && !debited;
 
   // Paying the card off is a transfer, not spend, even when the bank writes the card as "CC".
   const transfer = /credit card[\s\S]{0,40}payment|towards[\s\S]{0,40}(?:credit card|\scc\s)|\scc\s[\s\S]{0,30}payment|card bill/i.test(body);
-  let rail: Rail = 'debit';
-  // Banks write "CC" for credit card, with a space either side. That beats every other hint.
-  if (!transfer && /\sCC\s/.test(body)) rail = 'credit';
-  else if (/vpa\b|\bupi\b|@[a-z]{2,}/i.test(body) && !/spent using/i.test(body)) rail = 'upi';
-  else if (/spent using|credit card/i.test(body) && !transfer) rail = 'credit';
-  else if (/\bimps\b/i.test(body)) rail = 'imps';
-  else if (/\bneft\b|\brtgs\b/i.test(body)) rail = 'neft';
-  else if (/\bdebit card\b/i.test(body)) rail = 'debit';
+  const rail = guessRail(body, transfer);
 
   const bank = BANKS.find(([re]) => re.test(sender.toUpperCase()))?.[1] ?? 'Bank';
   const merchant = transfer ? 'Card bill' : merchantFrom(body);
-  const account = body.match(/(?:XX|\*{2,}|x{2,})(\d{4})/i)?.[1] ?? null;
+  const account = body.match(/(?:XX|\*{1,}|x{2,})(\d{3,6})/i)?.[1] ?? null;
 
   return {
     bank,
@@ -167,7 +181,7 @@ export function spanContext(body: string, slice: string) {
 
 function capture(body: string, before: string, after: string) {
   if (!before && !after) return null;
-  const m = body.match(new RegExp(esc(before) + '([0-9][0-9,]*(?:\\.[0-9]{1,2})?)' + esc(after)));
+  const m = body.match(new RegExp(esc(before) + '(?:(?:rs\\.?|inr|₹)\\s*)?([0-9][0-9,]*(?:\\.[0-9]{1,2})?)' + esc(after), 'i'));
   if (!m) return null;
   const n = Number(m[1].replace(/,/g, ''));
   return n > 0 ? n : null;
@@ -192,7 +206,7 @@ export function parseWithRules(sender: string, body: string, formats: FormatRule
         income: false,
         transfer: false,
         merchant,
-        rail: 'upi',
+        rail: guessRail(body),
         tag: suggestTag(merchant, false, false),
         account: null,
         at: parseWhen(body),

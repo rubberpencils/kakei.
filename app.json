@@ -51,7 +51,8 @@
         "./plugins/with-gradle-name.js",
         "kakie"
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

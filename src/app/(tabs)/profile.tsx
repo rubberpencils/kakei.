@@ -36,7 +36,7 @@ export default function Profile() {
 
   const signOut = () => {
     if (!store.signedIn) {
-      ask({ title: 'Erase everything on this phone?', body: 'Your expenses, splits and groups are deleted. Nothing is stored anywhere else, so this cannot be undone.', confirm: 'Erase', destructive: true, onConfirm: store.signOut });
+      ask({ title: 'Erase everything on this phone?', body: 'Your expenses, splits and groups are deleted. Nothing is stored anywhere else, so this cannot be undone.', confirm: 'Erase', destructive: true, still: true, onConfirm: store.signOut });
       return;
     }
     const keep = 'Your own spends, budget and tags stay on this phone. Shared groups leave it, and come back when you log in again.';
@@ -58,7 +58,14 @@ export default function Profile() {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 20 }}>
         <Avatar id={store.you.id} label={store.you.initials} size={64} you />
         <View style={{ flex: 1 }}>
-          <Input value={name} onChangeText={setName} onBlur={() => store.setName(name)} label="Your name" caps="words" style={{ fontFamily: font.semi, fontSize: 19, color: c.fg, padding: 0 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Input value={name} onChangeText={setName} onBlur={() => store.setName(name)} label="Your name" caps="words" style={{ flex: 1, fontFamily: font.semi, fontSize: 19, color: c.fg, padding: 0 }} />
+            {store.signedIn && store.pro ? (
+              <View style={{ height: 22, paddingHorizontal: 8, borderRadius: 11, backgroundColor: c.acc, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.semi, fontSize: 11, color: c.accFg }}>Pro</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={{ fontFamily: font.mono, fontSize: 12.5, color: c.mut, marginTop: 4 }}>{store.signedIn ? store.phone : 'On this phone only'}</Text>
         </View>
       </View>
@@ -100,13 +107,7 @@ export default function Profile() {
         />
       </View>
       <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut }}>One number for the month. Spend under it is savings.</Text>
-      {store.tags.length ? (
-        <View style={{ marginTop: 12, gap: 8 }}>
-          {store.tags.map((tag) => (
-            <TagBudget key={tag} tag={tag} value={store.tagBudgets[tag] ?? 0} onSave={(n) => store.setTagBudget(tag, n)} />
-          ))}
-        </View>
-      ) : null}
+      <TagBudgets />
 
       <Label>On this phone</Label>
       <Press onPress={() => shareCsv(store.expenses).catch(() => store.flash('Could not share the CSV'))}>
@@ -123,33 +124,7 @@ export default function Profile() {
       {store.signedIn && store.pro ? (
         <>
           <Label>Backup</Label>
-          <Text style={{ fontFamily: font.body, fontSize: 13, lineHeight: 18, color: c.mut, marginBottom: 8 }}>Encrypted backup. The server stores it and cannot read it.</Text>
-          <Press onPress={() => ask({
-            title: 'Back up this phone?',
-            body: 'The password seals the backup. The server never sees it.',
-            confirm: 'Back up',
-            input: { placeholder: 'Password', secure: true },
-            onConfirm: async (password) => {
-              if (!password) return;
-              const err = await store.saveBackup(password);
-              store.flash(err ?? 'Backed up');
-            },
-          })}>
-            <Row icon="cloud-upload-outline" title="Back up now" sub="Expenses, groups, budget and rules" />
-          </Press>
-          <Press onPress={() => ask({
-            title: 'Restore a backup?',
-            body: 'Personal expenses on this phone are replaced. Groups already here stay.',
-            confirm: 'Restore',
-            input: { placeholder: 'Password', secure: true },
-            onConfirm: async (password) => {
-              if (!password) return;
-              const err = await store.restoreBackup(password);
-              store.flash(err ?? 'Restored');
-            },
-          })}>
-            <Row icon="cloud-download-outline" title="Restore" sub="Uses the password from the backup" />
-          </Press>
+          <Row icon="cloud-lock-outline" title="On, with your account" sub="Sealed on this phone. Log in on a new phone and the ledger comes back. The server cannot read it." />
         </>
       ) : null}
       {store.signedIn && store.pro ? (
@@ -245,14 +220,83 @@ export default function Profile() {
   );
 }
 
+function TagBudgets() {
+  const c = usePalette();
+  const store = useStore();
+  const [adding, setAdding] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+  const budgeted = store.tags.filter((tag) => (store.tagBudgets[tag] ?? 0) > 0);
+  const free = store.tags.filter((tag) => !(store.tagBudgets[tag] ?? 0));
+  const save = () => {
+    const tag = store.addTag(picked || name);
+    const n = Number(amount);
+    if (!tag || !(n > 0)) return;
+    store.setTagBudget(tag, n);
+    setAdding(false);
+    setPicked(null);
+    setName('');
+    setAmount('');
+  };
+  return (
+    <View style={{ marginTop: 18, marginLeft: 4, paddingLeft: 14, borderLeftWidth: 1, borderLeftColor: c.line, gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="tag-outline" size={16} color={c.mut} />
+        <Text style={{ fontFamily: font.medium, fontSize: 12, letterSpacing: 1, color: c.mut }}>TAG BUDGETS</Text>
+      </View>
+      {budgeted.length ? null : <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, lineHeight: 18 }}>Only the tags you pick get a limit. The rest are just labels.</Text>}
+      {budgeted.map((tag) => (
+        <TagBudget key={tag} tag={tag} value={store.tagBudgets[tag] ?? 0} onSave={(n) => store.setTagBudget(tag, n)} />
+      ))}
+      {!adding ? (
+        <Press onPress={() => setAdding(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, marginLeft: 8 }}>
+          <Icon name="plus" size={18} />
+          <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>Add a tag budget</Text>
+        </Press>
+      ) : null}
+      {adding ? (
+        <View style={{ gap: 10, marginLeft: 8 }}>
+          <Input value={name} onChangeText={(v) => { setName(v); setPicked(null); }} label="New tag" placeholder="New tag" caps="none" autoFocus style={{ fontFamily: font.medium, fontSize: 16, color: c.fg, borderBottomWidth: 1, borderBottomColor: c.line, paddingVertical: 6 }} />
+          {free.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {free.map((tag) => {
+              const on = picked === tag;
+              return (
+                <Press key={tag} onPress={() => { setPicked(tag); setName(''); }} style={{ height: 32, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: on ? c.acc : c.line, backgroundColor: on ? c.acc : 'transparent', justifyContent: 'center' }}>
+                  <Text style={{ fontFamily: font.medium, fontSize: 13, color: on ? c.accFg : c.fg }}>#{tag}</Text>
+                </Press>
+              );
+            })}
+          </View>
+          ) : null}
+          {picked || name.trim() ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontFamily: font.body, color: c.mut }}>₹</Text>
+              <Input value={amount} onChangeText={(v) => setAmount(v.replace(/[^0-9]/g, ''))} mode="number" label="Tag budget" placeholder="2000" style={{ flex: 1, fontFamily: font.displaySm, fontSize: 20, color: c.fg }} />
+              <Press onPress={save} style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, backgroundColor: c.acc, justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.semi, color: c.accFg }}>Set</Text>
+              </Press>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function TagBudget({ tag, value, onSave }: { tag: string; value: number; onSave: (n: number) => void }) {
   const c = usePalette();
-  const [text, setText] = useState(value ? String(value) : '');
+  const [text, setText] = useState(String(value));
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 8 }}>
+      <Icon name="tag-outline" size={16} color={c.mut} />
       <Text style={{ flex: 1, fontFamily: font.medium, color: c.fg }}>#{tag}</Text>
       <Text style={{ fontFamily: font.body, color: c.mut }}>₹</Text>
-      <Input value={text} onChangeText={(v) => setText(v.replace(/[^0-9]/g, ''))} onBlur={() => onSave(Number(text) || 0)} mode="number" label={`${tag} budget`} placeholder="0" style={{ width: 80, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+      <Input value={text} onChangeText={(v) => setText(v.replace(/[^0-9]/g, ''))} onBlur={() => onSave(Number(text) || 0)} mode="number" label={`${tag} budget`} style={{ width: 80, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+      <Press onPress={() => onSave(0)} style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="close" size={16} color={c.mut} />
+      </Press>
     </View>
   );
 }

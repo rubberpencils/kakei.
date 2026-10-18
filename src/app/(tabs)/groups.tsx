@@ -123,7 +123,7 @@ export default function Groups() {
             })}
       </Animated.View>
 
-      {store.groups.length === 0 ? (
+      {view === 'groups' && real.length === 0 ? (
         <View style={{ marginTop: 40, alignItems: 'flex-start', gap: 10 }}>
           <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: c.sub, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="account-group-outline" size={28} />
@@ -136,6 +136,17 @@ export default function Groups() {
             <Icon name="plus" size={18} color={c.accFg} />
             <Text style={{ fontFamily: font.semi, color: c.accFg }}>Start a group</Text>
           </Press>
+        </View>
+      ) : null}
+      {view === 'friends' && friends.length === 0 ? (
+        <View style={{ marginTop: 28, alignItems: 'flex-start', gap: 10 }}>
+          <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: c.sub, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="account-outline" size={28} />
+          </View>
+          <Word size={20}>No friends yet</Word>
+          <Text style={{ fontFamily: font.body, color: c.mut, fontSize: 14, lineHeight: 20 }}>
+            Share an expense, then invite them with the group code. They show up here once you both owe something.
+          </Text>
         </View>
       ) : null}
     </ScrollView>

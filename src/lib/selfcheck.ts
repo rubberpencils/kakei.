@@ -1,6 +1,6 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic.ts';
 import { isPersonalSender } from './sender.ts';
-import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser.ts';
+import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, readMoney, spanContext } from './parser.ts';
 import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger.ts';
 import { handleMcp, type McpData } from './mcp.ts';
 import type { Expense, Settlement } from './types.ts';
@@ -18,6 +18,7 @@ const samples: [string, string, Record<string, unknown>][] = [
   ['JD-SBIINB', 'Your A/c XX7710 is credited Rs.85,000.00 on 25/09/26 by NEFT-ACME TECHNOLOGIES PVT LTD SALARY SEP26.', { amount: 85000, income: true, rail: 'neft', merchant: 'Acme Technologies', tag: 'salary' }],
   ['VM-HDFCBK', 'Rs.2150.00 debited from A/c XX4521 on 27-09-26 to VPA blinkit.payu@hdfcbank.', { merchant: 'Blinkit', tag: 'groceries', rail: 'upi' }],
   ['AX-AXISBK', 'INR 12,340.00 debited from A/c no. XX3308 on 27-09-26 towards HDFC Bank Credit Card XX2207 payment.', { amount: 12340, transfer: true, tag: 'bills', merchant: 'Card bill', account: '3308' }],
+  ['VM-HDFCBK-T', 'Sent Rs.508.20\nFrom HDFC Bank A/C *3737\nTo OwnLy\nOn 18/10/26\nRef 131484730917\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808', { amount: 508.2, income: false, rail: 'upi', merchant: 'OwnLy', account: '3737', bank: 'HDFC' }],
 ];
 
 for (const [sender, body, expect] of samples) {
@@ -35,6 +36,8 @@ eq(parseSms('VM-HDFCBK', 'Rs.250.00 credited to A/c XX4521 on 02-10-26 towards r
 eq(parseSms('AX-AXISBK', 'INR 199.00 debited from A/c XX3308 on 01-10-26 towards Netflix Autopay.')?.tag, 'entertainment', 'autopay keeps the merchant tag');
 eq(parseSms('VM-HDFCBK', 'Rs.40.00 debited from UPI Lite on 03-10-26 to VPA chai@okhdfcbank.')?.rail, 'upi', 'upi lite stays upi');
 eq(parseSms('VM-HDFCBK', 'Rs.499.00 credited to A/c XX4521 on 02-10-26. Transaction reversed for SWIGGY.')?.income, true, 'a reversal is money back');
+eq(readMoney('Rs.508.20'), 508.2, 'a chip that still says Rs is an amount');
+eq(readMoney('18/10/26'), null, 'a date is not an amount');
 eq(cleanMerchant('SWIGGY UPI 123456789012'), 'Swiggy', 'merchant drops upi and a long ref');
 const taughtBody = 'Wallet paid CAFE MOCHA at the counter ref 80.00 done';
 const nextBody = 'Wallet paid CAFE MOCHA at the counter ref 90.00 done';

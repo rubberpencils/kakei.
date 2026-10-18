@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useRouter } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Modal,
+  BackHandler,
   Platform,
   Pressable,
   StyleSheet,
@@ -213,7 +213,7 @@ export function TagPicker({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const query = slugTag(q);
-  const sugg = query ? tags.filter((t) => t.includes(query)).slice(0, 5) : [];
+  const sugg = (query ? tags.filter((t) => t.includes(query)) : tags).slice(0, 8);
   const showCreate = !!query && !tags.includes(query);
   const pick = (tag: string) => {
     const saved = tags.includes(tag) ? tag : addTag(tag);
@@ -257,7 +257,7 @@ export function TagPicker({
         />
         {!q ? <Icon name="plus" size={18} color={c.mut} /> : null}
       </View>
-      {query && (sugg.length > 0 || showCreate) ? (
+      {sugg.length > 0 || showCreate ? (
         <View style={[styles.menu, { borderColor: c.line }]}>
           {sugg.map((t) => {
             const col = tagColors(t, isDark);
@@ -425,6 +425,8 @@ type Ask = {
   confirm: string;
   destructive?: boolean;
   input?: { placeholder: string; secure?: boolean };
+  /** Show the sheet in place. Used when a slide fights the thing the person just tapped. */
+  still?: boolean;
   onConfirm: (value?: string) => void;
 };
 let showAsk: ((a: Ask) => void) | null = null;
@@ -451,23 +453,50 @@ export function ConfirmHost() {
     };
   }, []);
   const close = (then?: () => void) => {
+    const still = a?.still;
     setOpen(false);
+    if (still) {
+      setA(null);
+      then?.();
+      return;
+    }
     setTimeout(() => {
       setA(null);
       then?.();
     }, reduce ? 120 : 200);
   };
+  const closeRef = useRef(close);
+  useEffect(() => {
+    closeRef.current = close;
+  });
+  useEffect(() => {
+    if (!a) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, [a]);
+  const sheet = {
+    backgroundColor: c.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: insets.bottom + 20,
+  };
+  if (!a) return null;
   return (
-    <Modal visible={!!a} transparent statusBarTranslucent animationType="none" onRequestClose={() => close()}>
-      {open && a ? (
+    <View style={[StyleSheet.absoluteFill, { zIndex: 80, elevation: 80 }]}>
+      {open ? (
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(8,8,10,0.45)' }]}>
+          <Animated.View entering={a.still ? undefined : FadeIn.duration(180)} exiting={a.still ? undefined : FadeOut.duration(160)} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(8,8,10,0.45)' }]}>
             <Pressable style={{ flex: 1 }} onPress={() => close()} />
           </Animated.View>
           <Animated.View
-            entering={reduce ? FadeIn.duration(120) : SlideInDown.springify().damping(32).stiffness(320)}
-            exiting={reduce ? FadeOut.duration(120) : SlideOutDown.duration(200)}
-            style={{ backgroundColor: c.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 10, paddingBottom: insets.bottom + 20 }}
+            entering={a.still ? undefined : reduce ? FadeIn.duration(120) : SlideInDown.springify().damping(32).stiffness(320)}
+            exiting={a.still ? undefined : reduce ? FadeOut.duration(120) : SlideOutDown.duration(200)}
+            style={sheet}
           >
             <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.bar, marginBottom: 20 }} />
             <Text style={{ fontFamily: font.displaySm, fontSize: 20, color: c.fg }}>{a.title}</Text>
@@ -495,7 +524,7 @@ export function ConfirmHost() {
           </Animated.View>
         </View>
       ) : null}
-    </Modal>
+    </View>
   );
 }
 
@@ -529,6 +558,7 @@ export function Field({
         label={label}
         secureTextEntry={secure}
         mode={keyboard === 'phone-pad' ? 'phone' : keyboard === 'number-pad' ? 'number' : 'text'}
+        keyboardType={keyboard === 'url' ? 'url' : keyboard === 'email-address' ? 'email-address' : undefined}
         caps={auto === 'words' ? 'words' : 'none'}
         style={{ height: 52, borderRadius: 16, borderWidth: 1, borderColor: error ? c.neg : c.line, paddingHorizontal: 16, fontFamily: font.body, fontSize: 16, color: c.fg }}
       />

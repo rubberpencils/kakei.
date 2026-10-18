@@ -212,8 +212,6 @@ function Account({
   const store = useStore();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,7 +224,7 @@ function Account({
     setError(null);
     if (mode === 'signup' && !name.trim()) return setError('Add your name so friends recognise you');
     setBusy(true);
-    const err = mode === 'signup' ? await store.signUp(name, phone, pass, code) : await store.signIn(phone, pass);
+    const err = mode === 'signup' ? await store.signUp(name, phone, pass) : await store.signIn(phone, pass);
     setBusy(false);
     if (err) setError(err);
     else {
@@ -265,21 +263,6 @@ function Account({
       <Animated.View entering={rise(1)} style={{ gap: 16, marginTop: 28 }}>
         {mode === 'signup' ? <Field label="Name" value={name} onChange={setName} placeholder="Ananya Rao" auto="words" /> : null}
         <Field label="Phone" value={phone} onChange={setPhone} placeholder="98765 43210" keyboard="phone-pad" />
-        {mode === 'signup' ? (
-          <View style={{ gap: 10 }}>
-            <Field label="Code from the text" value={code} onChange={setCode} placeholder="6 digits" keyboard="number-pad" />
-            <Press onPress={async () => {
-              setError(null);
-              setBusy(true);
-              const err = await store.requestCode(phone, 'signup');
-              setBusy(false);
-              if (err) setError(err);
-              else setSent(true);
-            }}>
-              <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.fg }}>{sent ? 'Send the code again' : 'Send a code'}</Text>
-            </Press>
-          </View>
-        ) : null}
         <Field label="Password" value={pass} onChange={setPass} placeholder="At least 6 characters" secure error={error} />
       </Animated.View>
       <Animated.View entering={rise(2)} style={{ marginTop: 20 }}>

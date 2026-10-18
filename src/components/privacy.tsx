@@ -8,7 +8,7 @@ import { font } from '@/lib/theme';
 const POINTS = [
   { icon: 'cellphone-lock', title: 'On this phone', body: 'Personal spends, budget, tags, bank SMS, account digits and bank names stay here.' },
   { icon: 'account-group-outline', title: 'Shared groups', body: 'A group is sealed in transit and at rest. The server can read it so the people in it stay in sync.' },
-  { icon: 'cloud-lock-outline', title: 'Backup', body: 'An encrypted backup is a blob. The server stores it and cannot read it.' },
+  { icon: 'cloud-lock-outline', title: 'Backup', body: 'The ledger is sealed with your account password and backed up on its own. Log in on a new phone and it comes back. The server cannot read it.' },
   { icon: 'server-outline', title: 'Remote MCP', body: 'Only if you turn it on. The server keeps a readable copy without SMS text, account digits or bank names. Off stops access and keeps the token.' },
 ];
 

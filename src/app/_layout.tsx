@@ -15,7 +15,6 @@ import { Pressable, Text, useColorScheme, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReducedMotion } from 'react-native-reanimated';
 
-import { KeyboardHost } from '@/components/keyboard';
 import { McpHost } from '@/components/mcp-host';
 import { Splash } from '@/components/splash';
 import { ConfirmHost, Toast } from '@/components/ui';
@@ -89,8 +88,6 @@ function Shell() {
           <Stack.Screen name="reset" />
         </Stack>
       ) : null}
-      {/* The keyboard sits under the screens, so they shrink to make room for it. */}
-      <KeyboardHost />
       </View>
       <McpHost />
       <Toast />

@@ -15,6 +15,7 @@ export type BackupPayload = {
   tags: string[];
   rules: MerchantRule[];
   history: MonthSnapshot[];
+  tagBudgets?: Record<string, number>;
 };
 
 function b64(bytes: Uint8Array) {

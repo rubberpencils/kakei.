@@ -213,7 +213,6 @@ export function createApp(db: DatabaseSync, opts: {
     const phone = phoneOf(body.phone);
     const pass = typeof body.password === 'string' ? body.password : '';
     if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
-    takeCode(phone, 'signup', body.code);
     if (one('select 1 from users where phone = ?', phone)) fail(409, 'That phone already has an account. Log in instead.');
     const user = { id: newId(), name, phone };
     return tx(() => {
