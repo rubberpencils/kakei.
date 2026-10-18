@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Keyboard, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '@/components/input';
 import { buzz, goBack, Icon, Press, TagPicker, Toggle, usePalette } from '@/components/ui';
 import { localNoon, uid } from '@/lib/format';
-import { useKeyboard } from '@/lib/keyboard';
+import { cleanAmount } from '@/lib/input-rules';
 import { equalShares } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, RAIL_ICON, RAIL_LABEL } from '@/lib/theme';
@@ -17,12 +18,26 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'];
 export default function Add() {
   const c = usePalette();
   const store = useStore();
-  const { field } = useKeyboard();
+  const params = useLocalSearchParams<{ rail?: string }>();
   const [kind, setKind] = useState<'exp' | 'inc'>('exp');
   const [amt, setAmt] = useState('');
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setTyping(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setTyping(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const [note, setNote] = useState('');
   const [tag, setTag] = useState<string | null>(null);
-  const [rail, setRail] = useState<Rail>('upi');
+  const [rail, setRail] = useState<Rail>(params.rail === 'cash' ? 'cash' : 'upi');
+  const [seenRail, setSeenRail] = useState(params.rail);
+  if (seenRail !== params.rail) {
+    setSeenRail(params.rail);
+    if (params.rail === 'cash') setRail('cash');
+  }
   const [rec, setRec] = useState(false);
   const [freq, setFreq] = useState<'weekly' | 'monthly'>('monthly');
   const [daysAgo, setDaysAgo] = useState(0);
@@ -46,10 +61,8 @@ export default function Add() {
   const push = (k: string) => {
     setAmt((v) => {
       if (k === 'del') return v.slice(0, -1);
-      if (k === '.') return v.includes('.') ? v : `${v || '0'}.`;
-      if (v.includes('.') && v.split('.')[1].length >= 2) return v;
-      if (v.replace('.', '').length >= 7) return v;
-      return v === '0' ? k : v + k;
+      if (k === '.') return v.includes('.') ? v : cleanAmount(`${v || '0'}.`);
+      return cleanAmount(v === '0' ? k : v + k);
     });
   };
 
@@ -82,7 +95,7 @@ export default function Add() {
   const shown = amt ? Number(amt.split('.')[0] || '0').toLocaleString('en-IN') + (amt.includes('.') ? `.${amt.split('.')[1]}` : '') : '0';
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: field ? 0 : insets.bottom }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top, paddingBottom: typing ? 0 : insets.bottom }}>
       <View style={{ height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 }}>
         <Press onPress={goBack} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={24} /></Press>
         <View style={{ flexDirection: 'row', backgroundColor: c.sub, borderRadius: 18, padding: 3 }}>
@@ -177,8 +190,8 @@ export default function Add() {
           </View>
         ) : null}
       </ScrollView>
-      <View style={{ borderTopWidth: 1, borderTopColor: c.faint, paddingHorizontal: 16, paddingBottom: field ? 10 : 16 }}>
-        {field ? null : (
+      <View style={{ borderTopWidth: 1, borderTopColor: c.faint, paddingHorizontal: 16, paddingBottom: typing ? 10 : 16 }}>
+        {typing ? null : (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             {KEYS.map((k) => (
               <Press key={k} onPress={() => push(k)} style={{ width: '33.33%', height: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -187,7 +200,7 @@ export default function Add() {
             ))}
           </View>
         )}
-        <Press onPress={save} style={{ marginTop: field ? 10 : 0, height: 52, borderRadius: 26, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center', opacity: Number(amt) > 0 ? 1 : 0.4 }}>
+        <Press onPress={save} style={{ marginTop: typing ? 10 : 0, height: 52, borderRadius: 26, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center', opacity: Number(amt) > 0 ? 1 : 0.4 }}>
           <Text style={{ fontFamily: font.semi, color: c.accFg, fontSize: 16 }}>{group ? `Save to ${group.name}` : kind === 'inc' ? 'Save income' : 'Save expense'}</Text>
         </Press>
       </View>

@@ -3,11 +3,13 @@ import * as Haptics from 'expo-haptics';
 import { router, useRouter } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Modal,
+  BackHandler,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type PressableProps,
   type StyleProp,
@@ -203,6 +205,20 @@ export function Toggle({ on, onPress }: { on: boolean; onPress: () => void }) {
   );
 }
 
+/** Finger moves left for the next item, right for the previous. Vertical scrolls are left alone. */
+export function SwipeShift({ onNext, onPrev, children }: { onNext: () => void; onPrev: () => void; children: ReactNode }) {
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 28 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx <= -56) onNext();
+        else if (g.dx >= 56) onPrev();
+      },
+    }),
+  ).current;
+  return <View {...pan.panHandlers}>{children}</View>;
+}
+
 export function TagPicker({
   value, onChange,
 }: { value: string | null; onChange: (tag: string | null) => void }) {
@@ -212,7 +228,7 @@ export function TagPicker({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const query = slugTag(q);
-  const sugg = query ? tags.filter((t) => t.includes(query)).slice(0, 5) : [];
+  const sugg = (query ? tags.filter((t) => t.includes(query)) : tags).slice(0, 8);
   const showCreate = !!query && !tags.includes(query);
   const pick = (tag: string) => {
     const saved = tags.includes(tag) ? tag : addTag(tag);
@@ -256,7 +272,7 @@ export function TagPicker({
         />
         {!q ? <Icon name="plus" size={18} color={c.mut} /> : null}
       </View>
-      {query && (sugg.length > 0 || showCreate) ? (
+      {sugg.length > 0 || showCreate ? (
         <View style={[styles.menu, { borderColor: c.line }]}>
           {sugg.map((t) => {
             const col = tagColors(t, isDark);
@@ -418,7 +434,16 @@ export function Toast() {
   );
 }
 
-type Ask = { title: string; body?: string; confirm: string; destructive?: boolean; onConfirm: () => void };
+type Ask = {
+  title: string;
+  body?: string;
+  confirm: string;
+  destructive?: boolean;
+  input?: { placeholder: string; secure?: boolean };
+  /** Show the sheet in place. Used when a slide fights the thing the person just tapped. */
+  still?: boolean;
+  onConfirm: (value?: string) => void;
+};
 let showAsk: ((a: Ask) => void) | null = null;
 
 export function ask(a: Ask) {
@@ -431,8 +456,10 @@ export function ConfirmHost() {
   const reduce = useReducedMotion();
   const [a, setA] = useState<Ask | null>(null);
   const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
   useEffect(() => {
     showAsk = (next) => {
+      setValue('');
       setA(next);
       setOpen(true);
     };
@@ -441,30 +468,68 @@ export function ConfirmHost() {
     };
   }, []);
   const close = (then?: () => void) => {
+    const still = a?.still;
     setOpen(false);
+    if (still) {
+      setA(null);
+      then?.();
+      return;
+    }
     setTimeout(() => {
       setA(null);
       then?.();
     }, reduce ? 120 : 200);
   };
+  const closeRef = useRef(close);
+  useEffect(() => {
+    closeRef.current = close;
+  });
+  useEffect(() => {
+    if (!a) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, [a]);
+  const sheet = {
+    backgroundColor: c.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: insets.bottom + 20,
+  };
+  if (!a) return null;
   return (
-    <Modal visible={!!a} transparent statusBarTranslucent animationType="none" onRequestClose={() => close()}>
-      {open && a ? (
+    <View style={[StyleSheet.absoluteFill, { zIndex: 80, elevation: 80 }]}>
+      {open ? (
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(160)} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(8,8,10,0.45)' }]}>
+          <Animated.View entering={a.still ? undefined : FadeIn.duration(180)} exiting={a.still ? undefined : FadeOut.duration(160)} style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(8,8,10,0.45)' }]}>
             <Pressable style={{ flex: 1 }} onPress={() => close()} />
           </Animated.View>
           <Animated.View
-            entering={reduce ? FadeIn.duration(120) : SlideInDown.springify().damping(32).stiffness(320)}
-            exiting={reduce ? FadeOut.duration(120) : SlideOutDown.duration(200)}
-            style={{ backgroundColor: c.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 10, paddingBottom: insets.bottom + 20 }}
+            entering={a.still ? undefined : reduce ? FadeIn.duration(120) : SlideInDown.springify().damping(32).stiffness(320)}
+            exiting={a.still ? undefined : reduce ? FadeOut.duration(120) : SlideOutDown.duration(200)}
+            style={sheet}
           >
             <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.bar, marginBottom: 20 }} />
             <Text style={{ fontFamily: font.displaySm, fontSize: 20, color: c.fg }}>{a.title}</Text>
             {a.body ? <Text style={{ fontFamily: font.body, fontSize: 15, lineHeight: 22, color: c.mut, marginTop: 8 }}>{a.body}</Text> : null}
+            {a.input ? (
+              <TextInput
+                value={value}
+                onChangeText={setValue}
+                placeholder={a.input.placeholder}
+                placeholderTextColor={c.faint}
+                secureTextEntry={a.input.secure}
+                autoCapitalize="none"
+                style={{ marginTop: 16, borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: font.body, fontSize: 16, color: c.fg }}
+              />
+            ) : null}
             <View style={{ marginTop: 24, gap: 4 }}>
               <Press
-                onPress={() => { buzz(a.destructive ? 'tap' : 'done'); close(a.onConfirm); }}
+                onPress={() => { buzz(a.destructive ? 'tap' : 'done'); const typed = value; close(() => a.onConfirm(a.input ? typed : undefined)); }}
                 style={[styles.btn, { backgroundColor: a.destructive ? c.neg : c.acc }]}
               >
                 <Text style={[styles.btnText, { color: a.destructive ? '#fff' : c.accFg, fontFamily: font.semi }]}>{a.confirm}</Text>
@@ -474,7 +539,7 @@ export function ConfirmHost() {
           </Animated.View>
         </View>
       ) : null}
-    </Modal>
+    </View>
   );
 }
 
@@ -508,6 +573,7 @@ export function Field({
         label={label}
         secureTextEntry={secure}
         mode={keyboard === 'phone-pad' ? 'phone' : keyboard === 'number-pad' ? 'number' : 'text'}
+        keyboardType={keyboard === 'url' ? 'url' : keyboard === 'email-address' ? 'email-address' : undefined}
         caps={auto === 'words' ? 'words' : 'none'}
         style={{ height: 52, borderRadius: 16, borderWidth: 1, borderColor: error ? c.neg : c.line, paddingHorizontal: 16, fontFamily: font.body, fontSize: 16, color: c.fg }}
       />

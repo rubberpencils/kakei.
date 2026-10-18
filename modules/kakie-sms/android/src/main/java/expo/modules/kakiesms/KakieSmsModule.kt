@@ -29,9 +29,18 @@ import java.util.concurrent.TimeUnit
 
 private const val MAX_BODY = 1_000_000
 
+/** Digits only, 8 to 15 long, after spaces and one leading +. Banks use short codes like VM-HDFCBK. */
+fun isPersonalSender(address: String): Boolean {
+  val cleaned = address.filter { !it.isWhitespace() }.removePrefix("+")
+  return cleaned.length in 8..15 && cleaned.all { it.isDigit() }
+}
+
 private class McpReply(val status: Int, val body: String)
 
 class KakieSmsModule : Module() {
+  companion object {
+    @Volatile var ping: (() -> Unit)? = null
+  }
   private var mcpSocket: ServerSocket? = null
   private var mcpToken = ""
   // 4 workers and a short queue. Extra connections are dropped instead of piling up, so a flood cannot exhaust memory.
@@ -41,7 +50,11 @@ class KakieSmsModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("KakieSms")
 
-    Events("onMcpRequest")
+    Events("onMcpRequest", "onSms")
+
+    OnCreate {
+      ping = { sendEvent("onSms", mapOf("n" to 1)) }
+    }
 
     AsyncFunction("readInbox") { limit: Int ->
       val context = appContext.reactContext ?: throw CodedException("No react context")
@@ -58,8 +71,10 @@ class KakieSmsModule : Module() {
       val out = ArrayList<Map<String, Any>>()
       cursor.use {
         while (it.moveToNext() && out.size < cap) {
+          val sender = it.getString(0) ?: ""
+          if (isPersonalSender(sender)) continue
           val row = HashMap<String, Any>()
-          row["sender"] = it.getString(0) ?: ""
+          row["sender"] = sender
           row["body"] = it.getString(1) ?: ""
           row["date"] = it.getLong(2)
           out.add(row)
@@ -145,7 +160,52 @@ class KakieSmsModule : Module() {
       null
     }
 
-    OnDestroy { stopListener() }
+    AsyncFunction("drainSms") {
+      val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
+      SmsInbox.drain(context)
+    }
+
+    AsyncFunction("setSmsNotify") { on: Boolean ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      SmsInbox.setNotify(context, on)
+      null
+    }
+
+    AsyncFunction("setMerchantTags") { json: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      SmsInbox.setTags(context, json)
+      null
+    }
+
+    AsyncFunction("drainFileActions") {
+      val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, String>>()
+      SmsInbox.drainActions(context)
+    }
+
+    AsyncFunction("showTestSms") {
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      val body = "Sent Rs.42.50\nTo Chai\nUPI"
+      val id = SmsInbox.push(context, "VM-HDFCBK", body, System.currentTimeMillis())
+      SmsReceiver.post(context, id, body)
+      ping?.invoke()
+      null
+    }
+
+    AsyncFunction("showNote") { title: String, body: String, id: Int ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+      if (Build.VERSION.SDK_INT >= 26) {
+        mgr.createNotificationChannel(android.app.NotificationChannel("kakei.sms", "Bank messages", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+      }
+      val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, "kakei.sms") else android.app.Notification.Builder(context)
+      mgr.notify(id, builder.setSmallIcon(android.R.drawable.stat_notify_more).setContentTitle(title).setContentText(body).setAutoCancel(true).build())
+      null
+    }
+
+    OnDestroy {
+      ping = null
+      stopListener()
+    }
   }
 
   private fun startHostService() {

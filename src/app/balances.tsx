@@ -5,7 +5,7 @@ import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar, Back, buzz, Icon, Press, usePalette, Word } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { dust, inr } from '@/lib/format';
 import { personName, youBalances } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -46,7 +46,7 @@ export default function Balances() {
         })}
       </View>
 
-      <Text style={{ marginTop: 28, fontFamily: font.display, fontSize: 52, letterSpacing: -1.5, color: total > 0.5 ? color : c.fg }}>₹{inr(total)}</Text>
+      <Text style={{ marginTop: 28, fontFamily: font.display, fontSize: 52, letterSpacing: -1.5, color: total > dust ? color : c.fg }}>₹{inr(total)}</Text>
       <Text style={{ marginTop: 4, fontFamily: font.body, fontSize: 14, color: c.mut, lineHeight: 20 }}>
         {rows.length
           ? side === 'owed'

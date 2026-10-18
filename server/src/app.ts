@@ -1,7 +1,9 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
+import { answerMcp, privateKey, type McpData } from './mcp-host.ts';
+import { groupPage } from './page.ts';
 import { makeVault } from './vault.ts';
 
 type Row = Record<string, any>;
@@ -72,12 +74,12 @@ function checkPass(pw: string, stored: string) {
 const sha = (t: string) => createHash('sha256').update(t).digest('hex');
 const newId = () => randomBytes(9).toString('base64url');
 
-async function readBody(req: IncomingMessage): Promise<Row> {
+async function readBody(req: IncomingMessage, max = 1_000_000): Promise<Row> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > 1_000_000) fail(413, 'Body too large');
+    if (size > max) fail(413, 'Body too large');
     chunks.push(chunk);
   }
   if (!size) return {};
@@ -93,7 +95,17 @@ async function readBody(req: IncomingMessage): Promise<Row> {
 // A stolen token stops working after this long. People sign in again.
 const SESSION_MS = 90 * 24 * 3600 * 1000;
 
-export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; everyonePro?: boolean }) {
+const OTP_MS = 10 * 60 * 1000;
+
+export function createApp(db: DatabaseSync, opts: {
+  cors: string;
+  key?: Buffer;
+  everyonePro?: boolean;
+  otpUrl?: string;
+  sendOtp?: (phone: string, code: string) => void | Promise<void>;
+  verifyPlay?: (purchaseToken: string, productId: string) => Promise<{ expiry: number }>;
+  complete?: (history: { role: string; parts: Record<string, unknown>[] }[]) => Promise<{ role?: string; parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] }>;
+}) {
   // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
   const vault = makeVault(opts.key ?? randomBytes(32));
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
@@ -102,6 +114,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
 
   // ponytail: in-memory lockout, resets on restart and is per process. Move to the DB if you run several instances.
   const fails = new Map<string, { n: number; until: number }>();
+  const views = new Map<string, { n: number; until: number }>();
 
   const memberOf = (groupId: string, personId: string) =>
     !!one('select 1 from members where group_id = ? and person_id = ?', groupId, personId);
@@ -151,6 +164,50 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
     }
   };
 
+  function sameHash(a: string, b: string) {
+    const x = Buffer.from(a);
+    const y = Buffer.from(b);
+    return x.length === y.length && timingSafeEqual(x, y);
+  }
+
+  function takeCode(phone: string, purpose: string, code: unknown) {
+    const given = typeof code === 'string' ? code.trim() : '';
+    const row = one('select code_hash, expires from otps where phone = ? and purpose = ?', phone, purpose);
+    if (!row || row.expires < Date.now() || !sameHash(sha(given), row.code_hash)) fail(400, 'That code is wrong or expired');
+    run('delete from otps where phone = ? and purpose = ?', phone, purpose);
+  }
+
+  async function sendCode(body: Row) {
+    const phone = phoneOf(body.phone);
+    const purpose = body.purpose === 'reset' ? 'reset' : body.purpose === 'signup' ? 'signup' : '';
+    if (!purpose) fail(400, 'purpose is invalid');
+    if (purpose === 'reset' && !one('select 1 from users where phone = ?', phone)) return { ok: true };
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    run(
+      'insert into otps (phone, purpose, code_hash, expires) values (?, ?, ?, ?) on conflict(phone, purpose) do update set code_hash = excluded.code_hash, expires = excluded.expires',
+      phone, purpose, sha(code), Date.now() + OTP_MS,
+    );
+    if (opts.sendOtp) {
+      await opts.sendOtp(phone, code);
+      return { ok: true };
+    }
+    if (opts.otpUrl) {
+      const res = await fetch(opts.otpUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code }),
+      });
+      if (!res.ok) fail(502, 'Could not send the code');
+      return { ok: true };
+    }
+    if (opts.everyonePro) {
+      console.log(`kakei. code for ${phone}: ${code}`);
+      return { ok: true };
+    }
+    run('delete from otps where phone = ? and purpose = ?', phone, purpose);
+    fail(503, 'Phone verification is not configured');
+  }
+
   function signup(body: Row) {
     const name = text(body.name, 40, 'Name');
     const phone = phoneOf(body.phone);
@@ -178,6 +235,238 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
     }
     fails.delete(phone);
     return session({ id: row.id, name: row.name, phone: row.phone });
+  }
+
+  function resetPass(body: Row) {
+    const phone = phoneOf(body.phone);
+    const pass = typeof body.password === 'string' ? body.password : '';
+    if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
+    takeCode(phone, 'reset', body.otp);
+    const row = one('select id from users where phone = ?', phone);
+    if (!row) fail(400, 'That code is wrong or expired');
+    run('update users set pass = ? where id = ?', hashPass(pass), row.id);
+    run('delete from sessions where user_id = ?', row.id);
+    return { ok: true };
+  }
+
+  function accountExport(user: User) {
+    const snap = sync(user);
+    const row = one('select created, pro_until from users where id = ?', user.id);
+    const mine = 'select group_id from members where person_id = ?';
+    return {
+      account: { id: user.id, name: user.name, phone: user.phone, created: row?.created ?? null, proUntil: row?.pro_until ?? null },
+      memberships: all(`select group_id, person_id from members where group_id in (${mine})`, user.id),
+      backup: one('select wrap, blob, updated from backups where user_id = ?', user.id) ?? null,
+      mcp: one('select public_id, enabled, updated from mcp_hosts where user_id = ?', user.id) ?? null,
+      groups: snap.groups,
+      people: snap.people,
+      expenses: snap.expenses,
+      settlements: snap.settlements,
+    };
+  }
+
+  function deleteAccount(user: User, body: Row) {
+    const pass = typeof body.password === 'string' ? body.password : '';
+    const row = one('select pass from users where id = ?', user.id);
+    if (!row || !checkPass(pass, row.pass)) fail(401, 'Password is wrong');
+    tx(() => {
+      for (const g of all('select id from groups where created_by = ?', user.id)) {
+        const next = one(
+          `select p.user_id as id from members m join people p on p.id = m.person_id
+           where m.group_id = ? and p.user_id is not null and p.user_id != ? limit 1`,
+          g.id, user.id,
+        );
+        if (next) run('update groups set created_by = ? where id = ?', next.id, g.id);
+        else run('delete from groups where id = ?', g.id);
+      }
+      run('delete from expenses where owner_id = ? and group_id is null', user.id);
+      run('delete from hidden where user_id = ?', user.id);
+      run('delete from users where id = ?', user.id);
+    });
+    return { ok: true };
+  }
+
+  async function playPurchase(user: User, body: Row) {
+    if (!opts.verifyPlay) fail(501, 'This server does not sell Pro');
+    const purchaseToken = text(body.purchaseToken, 4096, 'purchaseToken');
+    const productId = body.productId === 'kakei_pro_monthly' || body.productId === 'kakei_pro_yearly' ? body.productId : '';
+    if (!productId) fail(400, 'productId is invalid');
+    let expiry = 0;
+    try {
+      expiry = (await opts.verifyPlay(purchaseToken, productId)).expiry;
+    } catch (err) {
+      fail(400, err instanceof Error ? err.message : 'That purchase is not active');
+    }
+    if (expiry <= Date.now()) fail(400, 'That purchase is not active');
+    const current = one('select pro_until from users where id = ?', user.id)?.pro_until ?? 0;
+    const until = Math.max(Number(current) || 0, expiry);
+    run('update users set pro_until = ? where id = ?', until, user.id);
+    return { proUntil: until };
+  }
+
+  function saveBackup(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const wrap = text(body.wrap, 8_000_000, 'wrap');
+    const blob = text(body.blob, 8_000_000, 'blob');
+    run(
+      'insert into backups (user_id, wrap, blob, updated) values (?, ?, ?, ?) on conflict(user_id) do update set wrap = excluded.wrap, blob = excluded.blob, updated = excluded.updated',
+      user.id, wrap, blob, Date.now(),
+    );
+    return { ok: true };
+  }
+
+  function readBackup(user: User) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select wrap, blob, updated from backups where user_id = ?', user.id);
+    if (!row) fail(404, 'No backup yet');
+    return { wrap: row.wrap, blob: row.blob, updated: row.updated };
+  }
+
+  function readSettings(uid: string): Row {
+    const row = one('select data from settings where user_id = ?', uid);
+    if (!row) return {};
+    try {
+      return JSON.parse(vault.open(row.data)) as Row;
+    } catch {
+      return {};
+    }
+  }
+
+  function writeSettings(uid: string, data: Row) {
+    run(
+      'insert into settings (user_id, data) values (?, ?) on conflict(user_id) do update set data = excluded.data',
+      uid, vault.seal(JSON.stringify(data)),
+    );
+  }
+
+  function mcpCreate(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    if (body.confirm !== true) fail(400, 'Confirm to create a remote MCP');
+    if (one('select 1 from mcp_hosts where user_id = ?', user.id)) fail(409, 'Remote MCP already exists');
+    const token = randomBytes(32).toString('base64url');
+    const publicId = randomBytes(9).toString('base64url');
+    run(
+      'insert into mcp_hosts (user_id, public_id, token_hash, enabled, snapshot, updated) values (?, ?, ?, 1, null, ?)',
+      user.id, publicId, sha(token), Date.now(),
+    );
+    const settings = readSettings(user.id);
+    settings.remoteMcp = { created: true, enabled: true, publicId };
+    writeSettings(user.id, settings);
+    return { token, publicId, url: `/m/${publicId}` };
+  }
+
+  function mcpSet(user: User, enabled: boolean) {
+    const row = one('select public_id from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    run('update mcp_hosts set enabled = ?, updated = ? where user_id = ?', enabled ? 1 : 0, Date.now(), user.id);
+    const settings = readSettings(user.id);
+    settings.remoteMcp = { created: true, enabled, publicId: row.public_id };
+    writeSettings(user.id, settings);
+    return { ok: true };
+  }
+
+  function mcpRegenerate(user: User) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select public_id from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    const token = randomBytes(32).toString('base64url');
+    run('update mcp_hosts set token_hash = ?, updated = ? where user_id = ?', sha(token), Date.now(), user.id);
+    return { token, publicId: row.public_id, url: `/m/${row.public_id}` };
+  }
+
+  function mcpSnapshot(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select enabled from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    if (!row.enabled) fail(403, 'Remote MCP is off');
+    if (privateKey(body)) fail(400, 'That snapshot includes a private field');
+    run('update mcp_hosts set snapshot = ?, updated = ? where user_id = ?', vault.seal(JSON.stringify(body)), Date.now(), user.id);
+    return { ok: true };
+  }
+
+  async function mcpCall(publicId: string, req: IncomingMessage) {
+    const row = one('select user_id, token_hash, enabled, snapshot from mcp_hosts where public_id = ?', publicId);
+    if (!row) fail(404, 'Not found');
+    const header = req.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!token || !sameHash(sha(token), row.token_hash)) fail(401, 'Token is wrong');
+    if (!row.enabled) fail(403, 'Remote MCP is off');
+    if (!isPro(row.user_id)) fail(402, 'Pro is required');
+    const owner = one('select name from users where id = ?', row.user_id);
+    const data: McpData = row.snapshot
+      ? JSON.parse(vault.open(row.snapshot))
+      : { you: { id: row.user_id, name: owner?.name ?? 'You', initials: 'YO' }, people: [], groups: [], expenses: [], settlements: [], budget: 0 };
+    const answered = answerMcp(JSON.stringify(await readBody(req, 1_000_000)), data);
+    return { mcpStatus: answered.status, mcpBody: answered.body };
+  }
+
+  async function waitSync(user: User, after: number) {
+    const mine = 'select group_id from members where person_id = ?';
+    const deadline = Date.now() + 25_000;
+    const newer = () => {
+      const groups = one(`select max(updated) as n from groups where id in (${mine})`, user.id)?.n ?? 0;
+      const expenses = one(`select max(updated) as n from expenses where group_id in (${mine})`, user.id)?.n ?? 0;
+      const settlements = one(`select max(updated) as n from settlements where group_id in (${mine})`, user.id)?.n ?? 0;
+      return Math.max(Number(groups) || 0, Number(expenses) || 0, Number(settlements) || 0) > after;
+    };
+    while (!newer()) {
+      if (Date.now() >= deadline) return { changed: false };
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return { changed: true };
+  }
+
+  function viewGroup(req: IncomingMessage, code: string) {
+    const ip = req.socket.remoteAddress ?? 'local';
+    const lock = views.get(ip);
+    if (lock && lock.n >= 30 && lock.until > Date.now()) fail(429, 'Too many views');
+    views.set(ip, { n: lock && lock.until > Date.now() ? lock.n + 1 : 1, until: Date.now() + 60_000 });
+    const g = one('select id, name, note from groups where code = ?', code);
+    if (!g) fail(404, 'Group not found');
+    const people = all(
+      `select p.id, p.name from people p join members m on m.person_id = p.id where m.group_id = ?`,
+      g.id,
+    );
+    const names = new Map(people.map((p) => [p.id as string, p.name as string]));
+    const rows = all('select data from expenses where group_id = ?', g.id).map((r) => {
+      const e = JSON.parse(vault.open(r.data));
+      return { name: names.get(e.payerId) ?? 'Someone', merchant: String(e.merchant ?? ''), amount: Number(e.amount) || 0 };
+    });
+    return { html: groupPage({ name: g.name, note: g.note }, rows) };
+  }
+
+  async function ask(user: User, body: Row) {
+    if (body.consent !== true) fail(400, 'Ask needs a yes first');
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const settings = readSettings(user.id);
+    settings.ask = true;
+    writeSettings(user.id, settings);
+    if (!opts.complete) fail(501, 'This server has no AI key');
+    const question = typeof body.question === 'string' ? body.question.trim() : '';
+    const toolResults = Array.isArray(body.toolResults) ? body.toolResults : null;
+    if (!question && !toolResults) return { ok: true };
+    const ym = new Date().toISOString().slice(0, 7);
+    const used = one('select n from ai_usage where user_id = ? and ym = ?', user.id, ym)?.n ?? 0;
+    if (used >= 30) fail(429, 'The monthly Ask limit is used up');
+    run(
+      'insert into ai_usage (user_id, ym, n) values (?, ?, ?) on conflict(user_id, ym) do update set n = n + 1',
+      user.id, ym, Number(used) + 1,
+    );
+    const history = Array.isArray(body.history) ? body.history as { role: string; parts: Record<string, unknown>[] }[] : [];
+    if (question) history.push({ role: 'user', parts: [{ text: question }] });
+    if (toolResults) history.push({ role: 'user', parts: toolResults.map((item) => ({ functionResponse: item })) });
+    let reply: { parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] };
+    try {
+      reply = await opts.complete(history);
+    } catch (err) {
+      fail(502, err instanceof Error ? err.message : 'The model did not answer');
+    }
+    const parts = reply.parts ?? [];
+    return {
+      history: [...history, { role: 'model', parts }],
+      text: parts.map((part) => part.text).filter(Boolean).join('\n'),
+      toolCalls: parts.filter((part) => part.functionCall).map((part) => ({ name: part.functionCall!.name, args: part.functionCall!.args ?? {} })),
+    };
   }
 
   function auth(req: IncomingMessage): User {
@@ -234,6 +523,7 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
       settlements,
       // Budget, tags and history stay on the phone. Kept as an empty object so older apps still read the reply.
       prefs: {},
+      settings: readSettings(uid),
     };
   }
 
@@ -320,6 +610,35 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
             sum += share;
           }
           if (!Object.keys(shares).length || Math.abs(sum - amount) > 1) fail(400, 'Split does not add up to the amount');
+          if (Array.isArray(e.payers) && e.payers.length) {
+            let paid = 0;
+            const payers: { id: string; amount: number }[] = [];
+            for (const p of e.payers) {
+              const row = obj(p, 'payer');
+              const pid = ident(row.id, 'payer');
+              if (!members.has(pid)) fail(400, 'Payer is not in the group');
+              const part = money(row.amount, 'Paid', true);
+              if (part > 0) payers.push({ id: pid, amount: part });
+              paid += part;
+            }
+            if (!payers.length || Math.abs(paid - amount) > 1) fail(400, 'Payments do not add up to the amount');
+            payerId = payers.slice().sort((a, b) => b.amount - a.amount)[0].id;
+            e.payers = payers;
+          }
+          if (Array.isArray(e.items) && e.items.length) {
+            let itemSum = 0;
+            const items: { name: string; amount: number; memberIds: string[] }[] = [];
+            for (const raw of e.items) {
+              const item = obj(raw, 'item');
+              const memberIds = Array.isArray(item.memberIds) ? item.memberIds.map((pid) => ident(pid, 'item member')) : [];
+              if (memberIds.some((pid) => !members.has(pid))) fail(400, 'Item includes someone outside the group');
+              const part = money(item.amount, 'Item');
+              items.push({ name: text(item.name, 40, 'Item'), amount: part, memberIds });
+              itemSum += part;
+            }
+            if (Math.abs(itemSum - amount) > 1) fail(400, 'Items do not add up to the amount');
+            e.items = items;
+          }
         }
         if (!RAILS.has(e.rail)) fail(400, 'rail is invalid');
         const data = {
@@ -336,6 +655,8 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
           groupId,
           payerId,
           shares,
+          payers: Array.isArray(e.payers) ? e.payers : null,
+          items: Array.isArray(e.items) ? e.items : null,
           // Which of your accounts paid is your business, not the group's.
           account: null,
           bank: null,
@@ -482,16 +803,35 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
   }
 
   async function route(req: IncomingMessage) {
-    const path = new URL(req.url ?? '/', 'http://local').pathname.replace(/\/+$/, '') || '/';
+    const url = new URL(req.url ?? '/', 'http://local');
+    const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method ?? 'GET';
     if (method === 'GET' && path === '/health') return { ok: true };
+    const view = path.match(/^\/view\/([A-Za-z0-9]{4,12})$/);
+    if (method === 'GET' && view) return viewGroup(req, view[1]);
+    const host = path.match(/^\/m\/([A-Za-z0-9_-]+)$/);
+    if (method === 'POST' && host) return mcpCall(host[1], req);
+    if (method === 'POST' && path === '/auth/otp') return sendCode(await readBody(req));
     if (method === 'POST' && path === '/auth/signup') return signup(await readBody(req));
     if (method === 'POST' && path === '/auth/login') return login(await readBody(req));
+    if (method === 'POST' && path === '/auth/reset') return resetPass(await readBody(req));
     const user = auth(req);
     if (method === 'POST' && path === '/auth/logout') {
       run('delete from sessions where token = ?', sha((req.headers.authorization ?? '').slice(7)));
       return { ok: true };
     }
+    if (method === 'POST' && path === '/billing/play') return playPurchase(user, await readBody(req));
+    if (method === 'POST' && path === '/backup') return saveBackup(user, await readBody(req, 8_000_000));
+    if (method === 'GET' && path === '/backup') return readBackup(user);
+    if (method === 'POST' && path === '/mcp/create') return mcpCreate(user, await readBody(req));
+    if (method === 'POST' && path === '/mcp/enable') return mcpSet(user, true);
+    if (method === 'POST' && path === '/mcp/disable') return mcpSet(user, false);
+    if (method === 'POST' && path === '/mcp/regenerate') return mcpRegenerate(user);
+    if (method === 'POST' && path === '/mcp/snapshot') return mcpSnapshot(user, await readBody(req, 8_000_000));
+    if (method === 'POST' && path === '/ai/ask') return ask(user, await readBody(req));
+    if (method === 'GET' && path === '/account/export') return accountExport(user);
+    if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
+    if (method === 'GET' && path === '/sync/wait') return waitSync(user, Number(url.searchParams.get('after') ?? 0));
     if (method === 'GET' && path === '/sync') return sync(user);
     if (method === 'POST' && path === '/ops') return ops(user, await readBody(req));
     if (method === 'POST' && path === '/join') return join(user, await readBody(req));
@@ -521,6 +861,15 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
         status = 500;
         out = { error: 'Server error' };
       }
+    }
+    if (out && typeof out === 'object' && 'html' in out) {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' }).end((out as { html: string }).html);
+      return;
+    }
+    const mcp = out && typeof out === 'object' && 'mcpBody' in out ? out as { mcpStatus: number; mcpBody: string } : null;
+    if (mcp) {
+      res.writeHead(mcp.mcpStatus, { 'Content-Type': 'application/json' }).end(mcp.mcpBody);
+      return;
     }
     res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(out));
   });

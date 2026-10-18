@@ -10,7 +10,7 @@ export type Op =
   | { type: 'expense.delete'; id: string }
   | { type: 'settlement.upsert'; settlement: Settlement }
   | { type: 'settlement.delete'; id: string }
-  | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[] } }
+  | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[]; tagBudgets?: Record<string, number> } }
   | { type: 'me.set'; name?: string }
   // Asks the server to forget personal data that older versions of the app uploaded.
   | { type: 'personal.purge' };
@@ -19,6 +19,8 @@ export type Queued = Op & { qid: string };
 
 export type Remote = {
   you: { id: string; name: string; phone: string };
+  pro: boolean;
+  settings?: { remoteMcp?: { created?: boolean; enabled?: boolean; publicId?: string }; ask?: boolean };
   people: { id: string; name: string; claimed: boolean }[];
   groups: (Omit<Group, 'memberIds'> & { memberIds: string[]; code: string; owner: boolean })[];
   expenses: Expense[];
@@ -55,9 +57,9 @@ export function serverName(base: string) {
   return isOfficial(base) ? 'Official servers' : base.replace(/^https?:\/\//, '');
 }
 
-export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown, timeout = 12000): Promise<T> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const timer = setTimeout(() => ctrl.abort(), timeout);
   let res: Response;
   try {
     res = await fetch(base + path, {

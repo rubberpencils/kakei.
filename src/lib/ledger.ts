@@ -1,10 +1,68 @@
-import type { Expense, Group, Person, Settlement } from './types';
-import { dayKey, localNoon } from './format';
+import type { Expense, Group, Person, Settlement } from './types.ts';
+import { dayKey, localNoon } from './format.ts';
 
 export type Debt = { fromId: string; toId: string; amount: number };
 
+export function tagSpend(expenses: Expense[], youId: string, tag: string, from: string, to: string) {
+  return round2(expenses.reduce((sum, e) => {
+    if (e.tag !== tag || e.income || e.transfer || !inRange(e.at, from, to)) return sum;
+    return sum + pocket(e, youId);
+  }, 0));
+}
+
+export function detectSubs(expenses: Expense[]) {
+  const groups = new Map<string, Expense[]>();
+  for (const e of expenses) {
+    if (e.income || e.transfer || e.sample || e.groupId) continue;
+    const key = e.merchant.toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), e]);
+  }
+  const out: { merchant: string; amount: number }[] = [];
+  for (const list of groups.values()) {
+    const sorted = list.slice().sort((a, b) => a.at.localeCompare(b.at));
+    if (sorted.length < 3) continue;
+    let gaps = 0;
+    for (let i = 1; i < sorted.length; i += 1) {
+      const days = (Date.parse(sorted[i].at) - Date.parse(sorted[i - 1].at)) / 86_400_000;
+      const prev = sorted[i - 1].amount;
+      const next = sorted[i].amount;
+      if (days >= 25 && days <= 35 && Math.abs(prev - next) / Math.max(prev, next) <= 0.15) gaps += 1;
+    }
+    if (gaps >= 2) out.push({ merchant: sorted[sorted.length - 1].merchant, amount: sorted[sorted.length - 1].amount });
+  }
+  return out;
+}
+
 export function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+const dust = 0.005;
+
+function expenseDebts(e: Expense): Debt[] {
+  if (!e.shares) return [];
+  const paid = new Map<string, number>();
+  const list = e.payers?.length ? e.payers : e.payerId ? [{ id: e.payerId, amount: e.amount }] : [];
+  for (const p of list) paid.set(p.id, round2((paid.get(p.id) || 0) + p.amount));
+  if (!paid.size) return [];
+  const net = new Map<string, number>();
+  const touch = (id: string, d: number) => net.set(id, round2((net.get(id) || 0) + d));
+  for (const [id, share] of Object.entries(e.shares)) touch(id, -share);
+  for (const [id, v] of paid) touch(id, v);
+  const cred = [...net.entries()].filter(([, v]) => v > dust).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -dust).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const out: Debt[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < cred.length && j < deb.length) {
+    const amt = Math.min(cred[i].v, deb[j].v);
+    if (amt > dust) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    cred[i].v -= amt;
+    deb[j].v -= amt;
+    if (cred[i].v < dust) i += 1;
+    if (deb[j].v < dust) j += 1;
+  }
+  return out;
 }
 
 export function equalShares(amount: number, ids: string[]) {
@@ -28,10 +86,8 @@ export function pairDebts(expenses: Expense[], settlements: Settlement[], groupI
     map.set(k, round2((map.get(k) || 0) + amt));
   };
   for (const e of expenses) {
-    if (e.groupId !== groupId || !e.shares || !e.payerId) continue;
-    for (const [id, share] of Object.entries(e.shares)) {
-      if (id !== e.payerId) add(id, e.payerId, share);
-    }
+    if (e.groupId !== groupId || !e.shares) continue;
+    for (const d of expenseDebts(e)) add(d.fromId, d.toId, d.amount);
   }
   for (const s of settlements) {
     if (s.groupId !== groupId) continue;
@@ -47,8 +103,8 @@ export function pairDebts(expenses: Expense[], settlements: Settlement[], groupI
     seen.add(k);
     seen.add(revK);
     const net = round2(v - rev);
-    if (net > 0.5) out.push({ fromId: from, toId: to, amount: net });
-    else if (net < -0.5) out.push({ fromId: to, toId: from, amount: round2(-net) });
+    if (net > dust) out.push({ fromId: from, toId: to, amount: net });
+    else if (net < -dust) out.push({ fromId: to, toId: from, amount: round2(-net) });
   }
   return out.sort((a, b) => b.amount - a.amount);
 }
@@ -59,18 +115,18 @@ export function simplify(debts: Debt[]): Debt[] {
     net.set(d.fromId, round2((net.get(d.fromId) || 0) - d.amount));
     net.set(d.toId, round2((net.get(d.toId) || 0) + d.amount));
   }
-  const cred = [...net.entries()].filter(([, v]) => v > 0.5).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
-  const deb = [...net.entries()].filter(([, v]) => v < -0.5).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const cred = [...net.entries()].filter(([, v]) => v > dust).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -dust).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
   const out: Debt[] = [];
   let i = 0;
   let j = 0;
   while (i < cred.length && j < deb.length) {
     const amt = Math.min(cred[i].v, deb[j].v);
-    if (amt > 0.5) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    if (amt > dust) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
     cred[i].v -= amt;
     deb[j].v -= amt;
-    if (cred[i].v < 0.5) i += 1;
-    if (deb[j].v < 0.5) j += 1;
+    if (cred[i].v < dust) i += 1;
+    if (deb[j].v < dust) j += 1;
   }
   return out;
 }
@@ -100,6 +156,65 @@ export function reroutes(pairs: Debt[], simple: Debt[]): Reroute[] {
     if (simple.some((s) => s.fromId === p.fromId && s.toId === p.toId)) continue;
     const to = simple.find((s) => s.fromId === p.fromId && s.toId !== p.toId && owesOnTo(pairs, p.toId, s.toId));
     if (to) out.push({ fromId: p.fromId, viaId: p.toId, toId: to.toId, amount: p.amount });
+  }
+  return out;
+}
+
+export type WhyLine = { kind: 'share' | 'settlement'; expenseId?: string; label: string; amount: number; direction: 'owe' | 'owed' };
+
+/** The bills and payments between two people, before simplification. Owe minus owed is the pairwise net. */
+export function whyYouPay(you: string, other: string, expenses: Expense[], settlements: Settlement[], groupId?: string): WhyLine[] {
+  const lines: WhyLine[] = [];
+  for (const e of expenses) {
+    if (!e.shares || !e.payerId) continue;
+    if (groupId && e.groupId !== groupId) continue;
+    if (!groupId && !e.groupId) continue;
+    const yours = e.shares[you] ?? 0;
+    const theirs = e.shares[other] ?? 0;
+    if (e.payerId === other && yours > 0) lines.push({ kind: 'share', expenseId: e.id, label: e.merchant, amount: yours, direction: 'owe' });
+    if (e.payerId === you && theirs > 0) lines.push({ kind: 'share', expenseId: e.id, label: e.merchant, amount: theirs, direction: 'owed' });
+  }
+  for (const s of settlements) {
+    if (groupId && s.groupId !== groupId) continue;
+    if (s.fromId === you && s.toId === other) lines.push({ kind: 'settlement', label: 'You paid', amount: s.amount, direction: 'owed' });
+    if (s.fromId === other && s.toId === you) lines.push({ kind: 'settlement', label: 'They paid you', amount: s.amount, direction: 'owe' });
+  }
+  return lines;
+}
+
+export type ExactStep = {
+  fromId: string;
+  toId: string;
+  amount: number;
+  because: { fromId: string; viaId: string; toId: string; amount: number }[];
+};
+
+/** Each simplified payment, and the pairwise debts it replaced. */
+export function exactSteps(pairs: Debt[], simple: Debt[]): ExactStep[] {
+  const left = pairs.map((d) => ({ ...d }));
+  const out: ExactStep[] = [];
+  for (const s of simple) {
+    const because: ExactStep['because'] = [];
+    let need = s.amount;
+    const direct = left.find((d) => d.fromId === s.fromId && d.toId === s.toId && d.amount > dust);
+    if (direct) {
+      const take = Math.min(direct.amount, need);
+      direct.amount = round2(direct.amount - take);
+      need = round2(need - take);
+    }
+    for (const hop of left) {
+      if (need <= dust) break;
+      if (hop.fromId !== s.fromId || hop.amount <= dust) continue;
+      const onward = left.find((d) => d.fromId === hop.toId && d.toId === s.toId && d.amount > dust);
+      if (!onward) continue;
+      const take = Math.min(hop.amount, onward.amount, need);
+      if (take <= dust) continue;
+      hop.amount = round2(hop.amount - take);
+      onward.amount = round2(onward.amount - take);
+      need = round2(need - take);
+      because.push({ fromId: s.fromId, viaId: hop.toId, toId: s.toId, amount: round2(take) });
+    }
+    out.push({ fromId: s.fromId, toId: s.toId, amount: s.amount, because });
   }
   return out;
 }
@@ -210,7 +325,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
       if (!target) continue;
       target.due = round2(Math.max(0, target.due - e.amount));
       target.lastPaid = e.at;
-      if (target.due < 0.5) target.charges = [];
+      if (target.due < dust) target.charges = [];
       continue;
     }
     if (e.rail !== 'credit') continue;
@@ -220,7 +335,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
     c.due = round2(c.due + e.amount);
     c.charges.unshift(e);
   }
-  return [...cards.values()].filter((c) => c.due >= 0.5).sort((a, b) => b.due - a.due);
+  return [...cards.values()].filter((c) => c.due >= dust).sort((a, b) => b.due - a.due);
 }
 
 export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
@@ -245,7 +360,7 @@ export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
         const pay = Math.min(due, left);
         rem[e.id][s.fromId] = round2(due - pay);
         left = round2(left - pay);
-        if (left < 0.5) break;
+        if (left < dust) break;
       }
     }
   }

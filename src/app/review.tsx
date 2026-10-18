@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeInRight, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Input } from '@/components/input';
 import { Back, buzz, Icon, Press, TagPicker, Toggle, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
+import { guessRail, readMoney } from '@/lib/parser';
 import { useStore } from '@/lib/store';
 import { font, RAIL_ICON, RAIL_LABEL } from '@/lib/theme';
 
@@ -16,6 +17,9 @@ export default function Review() {
   const store = useStore();
   const insets = useSafeAreaInsets();
   const reduce = useReducedMotion();
+  const params = useLocalSearchParams<{ id?: string; file?: string }>();
+  const want = typeof params.id === 'string' ? params.id : undefined;
+  const file = typeof params.file === 'string' ? params.file : undefined;
   const cur = store.queue[0];
   const [tag, setTag] = useState<string | null>(cur?.tag ?? null);
   const [groupOn, setGroupOn] = useState(false);
@@ -24,26 +28,43 @@ export default function Review() {
   const [reflect, setReflect] = useState(true);
   const [paste, setPaste] = useState('');
   const [seenId, setSeenId] = useState(cur?.id);
+  const [amountAt, setAmountAt] = useState<number | null>(null);
+  const [merchantAt, setMerchantAt] = useState<number | null>(null);
+  const [pick, setPick] = useState<'amount' | 'merchant'>('amount');
 
   if (cur && cur.id !== seenId) {
     setSeenId(cur.id);
     setTag(cur.tag);
-    setGroupOn(false);
+    const words = cur.body.split(/\s+/).filter(Boolean);
+    const hit = words.findIndex((w) => readMoney(w) != null);
+    setAmountAt(hit >= 0 ? hit : null);
+    setMerchantAt(null);
+    setPick(hit >= 0 ? 'merchant' : 'amount');
+    const learned = store.rules.find((r) => r.key === cur.merchant.toLowerCase());
+    setGroupOn(Boolean(learned?.groupId) || (want === cur.id && file === 'split'));
+    if (learned?.groupId) setGroupId(learned.groupId);
   }
+
+  useEffect(() => {
+    if (want) store.focusDraft(want);
+  }, [want, store]);
 
   const confirm = () => {
     if (!cur) return;
     const chosen = tag;
     if (groupOn && groupId === 'quick') {
+      store.remember(cur.merchant, chosen, null);
       router.push({ pathname: '/quick-split', params: { draftId: cur.id, tag: chosen ?? '' } });
       return;
     }
     if (groupOn && groups.some((g) => g.id === groupId)) {
+      store.remember(cur.merchant, chosen, groupId);
       router.push({ pathname: '/split', params: { groupId, draftId: cur.id, reflect: reflect ? '1' : '0', tag: chosen ?? '' } });
       return;
     }
     buzz('done');
-    store.confirmDraft(cur.id, { tag: chosen });
+    store.remember(cur.merchant, chosen, groupOn && groupId !== 'quick' ? groupId : null);
+    store.confirmDraft(cur.id, { tag: chosen, groupId: groupOn && groupId !== 'quick' ? groupId : null });
     store.flash(cur.transfer ? 'Card bill saved. Not counted as spend.' : 'Saved');
   };
 
@@ -79,6 +100,40 @@ export default function Review() {
             </View>
             <Text style={{ fontFamily: font.mono, fontSize: 12, lineHeight: 18, color: c.mut }}>{cur.body}</Text>
           </View>
+          {cur.amount <= 0 ? (
+            <FormatPick
+              body={cur.body}
+              sender={cur.sender}
+              amountAt={amountAt}
+              merchantAt={merchantAt}
+              pick={pick}
+              onPick={setPick}
+              onTap={(i) => {
+                buzz();
+                if (pick === 'amount') {
+                  if (amountAt === i) setAmountAt(null);
+                  else {
+                    setAmountAt(i);
+                    if (merchantAt === i) setMerchantAt(null);
+                    setPick('merchant');
+                  }
+                } else if (merchantAt === i) setMerchantAt(null);
+                else {
+                  setMerchantAt(i);
+                  if (amountAt === i) setAmountAt(null);
+                }
+              }}
+              onSkip={() => setMerchantAt(null)}
+              onSave={() => {
+                const words = cur.body.split(/\s+/).filter(Boolean);
+                const amount = amountAt == null ? '' : words[amountAt];
+                const merchant = merchantAt == null ? '' : words[merchantAt];
+                if (store.teach(cur.id, amount, merchant)) store.flash('Format saved');
+                else store.flash('Tap the chip that contains the amount');
+              }}
+            />
+          ) : (
+          <>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 24 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: font.semi, fontSize: 20, color: c.fg }}>{cur.merchant}</Text>
@@ -127,6 +182,8 @@ export default function Review() {
               ) : null}
             </View>
           ) : null}
+          </>
+          )}
           </Animated.View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 28 }}>
@@ -142,6 +199,64 @@ export default function Review() {
           </View>
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+function FormatPick({
+  body, sender, amountAt, merchantAt, pick, onPick, onTap, onSkip, onSave,
+}: {
+  body: string;
+  sender: string;
+  amountAt: number | null;
+  merchantAt: number | null;
+  pick: 'amount' | 'merchant';
+  onPick: (p: 'amount' | 'merchant') => void;
+  onTap: (i: number) => void;
+  onSkip: () => void;
+  onSave: () => void;
+}) {
+  const c = usePalette();
+  const words = body.split(/\s+/).filter(Boolean);
+  const amount = amountAt == null ? null : readMoney(words[amountAt] ?? '');
+  const rail = guessRail(body);
+  return (
+    <View style={{ marginTop: 18 }}>
+      <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.fg }}>This format is new</Text>
+      <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 4, lineHeight: 18 }}>
+        The amount is marked when the chip is filled. Tap it again to clear it. Merchant can be skipped. Next {sender} message uses this shape.
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+        {(['amount', 'merchant'] as const).map((id) => {
+          const on = pick === id;
+          return (
+            <Press key={id} onPress={() => onPick(id)} style={{ height: 32, paddingHorizontal: 12, borderRadius: 16, backgroundColor: on ? c.acc : c.sub, justifyContent: 'center' }}>
+              <Text style={{ fontFamily: font.medium, fontSize: 13, color: on ? c.accFg : c.fg }}>{id === 'amount' ? 'Pick amount' : 'Pick merchant'}</Text>
+            </Press>
+          );
+        })}
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
+        {words.map((word, i) => {
+          const kind = i === amountAt ? 'amount' : i === merchantAt ? 'merchant' : '';
+          return (
+            <Press key={`${word}-${i}`} onPress={() => onTap(i)} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: kind ? c.acc : c.line, backgroundColor: kind ? c.acc : 'transparent' }}>
+              <Text style={{ fontFamily: font.mono, fontSize: 12, color: kind ? c.accFg : c.fg }}>{word}</Text>
+            </Press>
+          );
+        })}
+      </View>
+      <Text style={{ fontFamily: font.mono, fontSize: 12, color: c.mut, marginTop: 12 }}>
+        Amount: {amount ? `₹${inr(amount)}` : '—'} · Merchant: {merchantAt == null ? 'skipped' : words[merchantAt]} · {RAIL_LABEL[rail]}
+      </Text>
+      {merchantAt != null ? (
+        <Press onPress={onSkip} style={{ marginTop: 8 }}>
+          <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.fg }}>Skip merchant</Text>
+        </Press>
+      ) : null}
+      <Press onPress={onSave} style={{ marginTop: 14, height: 44, borderRadius: 22, backgroundColor: amount ? c.acc : c.bar, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontFamily: font.medium, color: amount ? c.accFg : c.mut }}>Use this format</Text>
+      </Press>
     </View>
   );
 }

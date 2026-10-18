@@ -1,8 +1,9 @@
-import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
-import { parseSms } from './parser';
-import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
-import { handleMcp, type McpData } from './mcp';
-import type { Expense, Settlement } from './types';
+import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic.ts';
+import { isPersonalSender } from './sender.ts';
+import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, readMoney, spanContext } from './parser.ts';
+import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, round2, simplify, spendIn, whyYouPay, youBalances } from './ledger.ts';
+import { handleMcp, type McpData } from './mcp.ts';
+import type { Expense, Settlement } from './types.ts';
 
 function eq(actual: unknown, expected: unknown, msg: string) {
   if (actual !== expected) throw new Error(`${msg}: got ${String(actual)}`);
@@ -17,6 +18,7 @@ const samples: [string, string, Record<string, unknown>][] = [
   ['JD-SBIINB', 'Your A/c XX7710 is credited Rs.85,000.00 on 25/09/26 by NEFT-ACME TECHNOLOGIES PVT LTD SALARY SEP26.', { amount: 85000, income: true, rail: 'neft', merchant: 'Acme Technologies', tag: 'salary' }],
   ['VM-HDFCBK', 'Rs.2150.00 debited from A/c XX4521 on 27-09-26 to VPA blinkit.payu@hdfcbank.', { merchant: 'Blinkit', tag: 'groceries', rail: 'upi' }],
   ['AX-AXISBK', 'INR 12,340.00 debited from A/c no. XX3308 on 27-09-26 towards HDFC Bank Credit Card XX2207 payment.', { amount: 12340, transfer: true, tag: 'bills', merchant: 'Card bill', account: '3308' }],
+  ['VM-HDFCBK-T', 'Sent Rs.508.20\nFrom HDFC Bank A/C *3737\nTo OwnLy\nOn 18/10/26\nRef 131484730917\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808', { amount: 508.2, income: false, rail: 'upi', merchant: 'OwnLy', account: '3737', bank: 'HDFC' }],
 ];
 
 for (const [sender, body, expect] of samples) {
@@ -28,8 +30,33 @@ for (const [sender, body, expect] of samples) {
 }
 
 eq(parseSms('VM-HDFCBK', 'OTP is 482913. Do not share it with anyone.'), null, 'otp');
+eq(parseSms('VM-HDFCBK', 'Rs.120.00 debit failed for A/c XX4521. Transaction unsuccessful.') , null, 'failed debit is ignored');
+eq(parseSms('VM-HDFCBK', 'Rs.250.00 credited to A/c XX4521 on 02-10-26 towards refund from SWIGGY.')?.income, true, 'a refund is money in');
+eq(parseSms('VM-HDFCBK', 'Rs.250.00 credited to A/c XX4521 on 02-10-26 towards refund from SWIGGY.')?.merchant, 'Swiggy', 'refund merchant is cleaned');
+eq(parseSms('AX-AXISBK', 'INR 199.00 debited from A/c XX3308 on 01-10-26 towards Netflix Autopay.')?.tag, 'entertainment', 'autopay keeps the merchant tag');
+eq(parseSms('VM-HDFCBK', 'Rs.40.00 debited from UPI Lite on 03-10-26 to VPA chai@okhdfcbank.')?.rail, 'upi', 'upi lite stays upi');
+eq(parseSms('VM-HDFCBK', 'Rs.499.00 credited to A/c XX4521 on 02-10-26. Transaction reversed for SWIGGY.')?.income, true, 'a reversal is money back');
+eq(readMoney('Rs.508.20'), 508.2, 'a chip that still says Rs is an amount');
+eq(readMoney('18/10/26'), null, 'a date is not an amount');
+eq(cleanMerchant('SWIGGY UPI 123456789012'), 'Swiggy', 'merchant drops upi and a long ref');
+const taughtBody = 'Wallet paid CAFE MOCHA at the counter ref 80.00 done';
+const nextBody = 'Wallet paid CAFE MOCHA at the counter ref 90.00 done';
+const amountAt = spanContext(taughtBody, '80.00');
+const merchantAt = spanContext(taughtBody, 'CAFE MOCHA');
+if (!amountAt || !merchantAt) throw new Error('span');
+const taught = parseWithRules('VM-NEWBK', nextBody, [{
+  sender: 'VM-NEWBK', amountBefore: amountAt.before, amountAfter: amountAt.after, merchantBefore: merchantAt.before, merchantAfter: merchantAt.after,
+}], [{ key: 'cafe mocha', tag: 'coffee' }]);
+eq(taught?.amount, 90, 'a taught format reads the next amount');
+eq(taught?.tag, 'coffee', 'a learned merchant sets the tag');
+eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100, 20_000), true, 'the same merchant and amount within 3 minutes is a duplicate');
+eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100, 200_000), false, 'the same spend after 3 minutes is kept');
 
 const shares = equalShares(4800, ['ananya', 'aarav', 'meera', 'kabir']);
+const three = equalShares(100, ['a', 'b', 'c']);
+eq(three.a, 33.33, 'the first share is floored to paise');
+eq(three.c, 33.34, 'the last person takes the odd paisa');
+eq(round2(three.a + three.b + three.c), 100, 'the shares add up');
 eq(Object.values(shares).reduce((a, b) => a + b, 0), 4800, 'shares');
 
 const dinner: Expense = {
@@ -42,6 +69,12 @@ const rem = remainingOwed([dinner], sets);
 eq(owedBack(dinner, 'ananya', rem), 2400, 'owed');
 eq(pocket(dinner, 'ananya'), 1200, 'only your share is spend');
 eq(pocket({ ...dinner, reflect: false }, 'ananya'), 0, 'hidden');
+const sub = detectSubs([
+  { ...dinner, id: 'n1', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 199, at: '2026-01-15T12:00:00' },
+  { ...dinner, id: 'n2', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 199, at: '2026-02-15T12:00:00' },
+  { ...dinner, id: 'n3', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 210, at: '2026-03-16T12:00:00' },
+]);
+eq(sub[0]?.merchant, 'Netflix', 'three monthly charges look like a subscription');
 
 const debts = pairDebts([dinner], sets, 'goa');
 eq(debts.find((d) => d.fromId === 'aarav'), undefined, 'aarav settled');
@@ -56,7 +89,17 @@ eq(groupDebts(chain, [], trip).length, 1, 'simplified by default');
 eq(groupDebts(chain, [], { ...trip, simplify: false }).length, 2, 'pairwise when simplify is off');
 eq(friendBalances(chain, [], [trip], 'a').find((f) => f.id === 'c')?.net, 100, 'c pays a directly');
 eq(friendBalances(chain, [], [{ ...trip, simplify: false }], 'a').find((f) => f.id === 'b')?.net, 100, 'b owes a when not simplified');
+const multi: Expense = { ...dinner, id: 'm', groupId: 'trip', amount: 1000, payerId: 'a', payers: [{ id: 'a', amount: 600 }, { id: 'b', amount: 400 }], shares: { a: 400, b: 300, c: 300 } };
+const multiDebts = pairDebts([multi], [], 'trip');
+eq(multiDebts.find((d) => d.fromId === 'c' && d.toId === 'a')?.amount, 200, 'two payers: c owes the larger payer 200');
+eq(multiDebts.find((d) => d.fromId === 'c' && d.toId === 'b')?.amount, 100, 'two payers: c owes the other payer 100');
 eq(memberNets(pairDebts(chain, [], 'trip')).b, 0, 'b nets to zero');
+const pairs40 = [{ fromId: 'a', toId: 'b', amount: 100 }, { fromId: 'b', toId: 'c', amount: 40 }];
+const hop = exactSteps(pairs40, simplify(pairs40)).find((s) => s.toId === 'c');
+eq(hop?.amount, 40, 'A pays C the 40');
+eq(hop?.because[0]?.viaId, 'b', 'the 40 that A pays C names B');
+const dinnerWhy = whyYouPay('ananya', 'aarav', [dinner], sets, 'goa');
+eq(dinnerWhy.some((l) => l.direction === 'owed' && l.amount === 1200), true, 'why lists the share a friend still owes');
 
 const pct = percentShares(1000, { a: 33.3, b: 33.3, c: 33.4 });
 eq(Object.values(pct).reduce((x, y) => x + y, 0), 1000, 'percent shares add up');
@@ -187,5 +230,10 @@ eq(at({ mode: 'phone' }, '9876', 0, '+').value, '+9876', 'a plus can go first in
 eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').value, 'abc', 'paste lands at the caret');
 eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').cursor, 2, 'the caret ends after what was pasted');
 eq(clampCursor('abc', 9), 3, 'the caret never passes the end');
+
+eq(isPersonalSender('VM-HDFCBK'), false, 'a bank short code is not a personal sender');
+eq(isPersonalSender('+919876543210'), true, 'a plus phone number is personal');
+eq(isPersonalSender('9876543210'), true, 'a plain phone number is personal');
+eq(isPersonalSender('+91 98765 43210'), true, 'spaces in a phone number still count as personal');
 
 console.log('selfcheck ok');

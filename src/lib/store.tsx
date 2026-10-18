@@ -1,19 +1,32 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
-import { initials, localNoon, slugTag, uid } from './format';
-import { dueRecurring, equalShares } from './ledger';
-import { parseSms } from './parser';
+import { openBackup, sealBackup, type BackupPayload } from './backup';
+import { dust, initials, localNoon, slugTag, uid } from './format';
+import { dueRecurring, equalShares, friendBalances, monthBounds, personName, spendIn, tagSpend, whyYouPay } from './ledger';
+import { cleanMerchant, guessRail, parseWithRules, readMoney, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
-import { readDeviceSms } from './sms';
+import { onBankSms, readDeviceSms, drainDeviceSms, drainFileActions, syncSmsBridge } from './sms';
+import { handleMcp } from './mcp';
+import { showNote } from './notify';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
 
 const KEY = 'kakie.v2';
+const PASS = 'kakei.backupPass';
 
 // Developer options. They live only on this phone and are never synced.
-export type DevSettings = { mcp: boolean; lan: boolean; port: number; token: string };
+export type DevSettings = {
+  mcp: boolean;
+  lan: boolean;
+  port: number;
+  token: string;
+  remote: boolean;
+  remoteId: string;
+  remoteToken: string;
+};
 
 type Local = {
   base: string;
@@ -27,9 +40,15 @@ type Local = {
   tags: string[];
   budget: number;
   history: MonthSnapshot[];
+  tagBudgets: Record<string, number>;
+  alerted: string[];
+  lock: boolean;
   queue: Draft[];
   seen: string[];
   smsOn: boolean;
+  rules: MerchantRule[];
+  formats: FormatRule[];
+  recent: Hit[];
   dev: DevSettings;
   // Local mode: no account, no server. Everything lives on this phone.
   local: boolean;
@@ -39,6 +58,12 @@ type Local = {
   syncedAt: number | null;
   // Older versions uploaded personal spends. Set once the server has been asked to forget them.
   cleaned: boolean;
+  pro: boolean;
+  askOk: boolean;
+  digest: boolean;
+  sunday: string;
+  nudgeDay: string;
+  nudgeStamp: string;
 };
 
 const NOBODY: Person = { id: 'me', name: 'You', initials: 'YO' };
@@ -52,21 +77,73 @@ const FRESH: Local = {
   groups: [],
   expenses: [],
   settlements: [],
-  tags: TAGS,
+  tags: [],
   budget: 0,
   history: [],
+  tagBudgets: {},
+  alerted: [],
+  lock: false,
   queue: [],
   seen: [],
   smsOn: false,
-  dev: { mcp: false, lan: false, port: 8765, token: '' },
+  rules: [],
+  formats: [],
+  recent: [],
+  dev: { mcp: false, lan: false, port: 8765, token: '', remote: false, remoteId: '', remoteToken: '' },
   local: false,
   connecting: false,
   outbox: [],
   syncedAt: null,
   cleaned: false,
+  pro: false,
+  askOk: false,
+  digest: false,
+  sunday: '',
+  nudgeDay: '',
+  nudgeStamp: '',
 };
 
-type SmsIn = { sender: string; body: string; date: number };
+function ledgerOf(x: Local): BackupPayload {
+  return {
+    expenses: x.expenses, settlements: x.settlements, groups: x.groups, people: x.people,
+    budget: x.budget, tags: x.tags, rules: x.rules, history: x.history, tagBudgets: x.tagBudgets,
+  };
+}
+
+/** Local rows win on the same id. A new phone has none, so the backup fills it. */
+function absorb(cur: Local, data: BackupPayload): Local {
+  const personal = new Map<string, Expense>();
+  for (const e of (data.expenses ?? []).filter((e) => !e.groupId)) personal.set(e.id, e);
+  for (const e of cur.expenses.filter((e) => !e.groupId)) personal.set(e.id, e);
+  const groups = [...cur.groups];
+  for (const g of data.groups ?? []) if (!groups.some((h) => h.id === g.id)) groups.push(g);
+  const people = [...cur.people];
+  for (const p of data.people ?? []) if (p.id !== cur.you.id && !people.some((h) => h.id === p.id)) people.push(p);
+  const settlements = [...cur.settlements];
+  for (const s of data.settlements ?? []) if (!settlements.some((h) => h.id === s.id)) settlements.push(s);
+  const groupExpenses = [
+    ...cur.expenses.filter((e) => e.groupId),
+    ...(data.expenses ?? []).filter((e) => e.groupId && !cur.expenses.some((h) => h.id === e.id)),
+  ];
+  return {
+    ...cur,
+    expenses: [...personal.values(), ...groupExpenses],
+    groups,
+    people,
+    settlements,
+    budget: cur.budget || data.budget || 0,
+    tags: [...new Set([...cur.tags, ...(data.tags ?? [])])],
+    rules: cur.rules.length ? cur.rules : (data.rules ?? []),
+    history: cur.history.length ? cur.history : (data.history ?? []),
+    tagBudgets: { ...(data.tagBudgets ?? {}), ...cur.tagBudgets },
+  };
+}
+
+async function pushBackup(x: Local, password: string) {
+  await call(x.base, x.token, 'POST', '/backup', await sealBackup(ledgerOf(x), password));
+}
+
+type SmsIn = { sender: string; body: string; date: number; id?: string };
 type NewExpense = Omit<Expense, 'id' | 'sample'> & { sample?: boolean };
 export type SyncState = 'idle' | 'syncing' | 'offline';
 
@@ -122,6 +199,7 @@ function applyOp(s: Local, op: Op): Local {
         budget: op.prefs.budget ?? s.budget,
         tags: op.prefs.tags ?? s.tags,
         history: op.prefs.history ?? s.history,
+        tagBudgets: op.prefs.tagBudgets ?? s.tagBudgets,
       };
     case 'personal.purge':
       return s;
@@ -216,6 +294,11 @@ function rebase(s: Local, r: Remote): Local {
     groups: r.groups,
     expenses: [...shared, ...s.expenses.filter((e) => !e.groupId)],
     settlements: r.settlements,
+    pro: r.pro === true,
+    askOk: r.settings?.ask === true || s.askOk,
+    dev: r.settings?.remoteMcp?.publicId
+      ? { ...s.dev, remote: !!r.settings.remoteMcp.enabled, remoteId: r.settings.remoteMcp.publicId, remoteToken: s.dev.remoteId === r.settings.remoteMcp.publicId ? s.dev.remoteToken : '' }
+      : s.dev,
     syncedAt: Date.now(),
   };
   for (const op of s.outbox) next = applyOp(next, op);
@@ -223,11 +306,40 @@ function rebase(s: Local, r: Remote): Local {
   return due.length ? enqueue(next, due.map((expense) => ({ type: 'expense.upsert', expense }))) : next;
 }
 
-function draftFrom(sender: string, body: string, at: string, key: string): Draft | null {
-  const parsed = parseSms(sender, body);
-  if (!parsed) return null;
+function reparseQueue(s: Local): Local {
+  let changed = false;
+  const queue = s.queue.map((d) => {
+    if (d.amount > 0) return d;
+    const parsed = parseWithRules(d.sender, d.body, s.formats, s.rules);
+    if (!parsed) return d;
+    changed = true;
+    return {
+      ...d,
+      bank: parsed.bank,
+      amount: parsed.amount,
+      income: parsed.income,
+      transfer: parsed.transfer,
+      merchant: parsed.merchant,
+      rail: parsed.rail,
+      tag: parsed.tag,
+      account: parsed.account,
+      at: parsed.at ?? d.at,
+    };
+  });
+  return changed ? { ...s, queue } : s;
+}
+
+function draftFrom(sender: string, body: string, at: string, key: string, rules: MerchantRule[], formats: FormatRule[], id?: string): Draft | null {
+  const parsed = parseWithRules(sender, body, formats, rules);
+  if (!parsed) {
+    if (body.trim().length < 12) return null;
+    return {
+      id: id ?? uid(), key, sender, body, bank: 'Bank', at, amount: 0, income: false, transfer: false,
+      merchant: '', rail: 'upi', tag: null, account: null,
+    };
+  }
   return {
-    id: uid(), key, sender, body,
+    id: id ?? uid(), key, sender, body,
     bank: parsed.bank,
     at: parsed.at ?? at,
     amount: parsed.amount,
@@ -240,18 +352,61 @@ function draftFrom(sender: string, body: string, at: string, key: string): Draft
   };
 }
 
+function applyFileActions(s: Local, actions: { id: string; kind: string; tag: string }[]): Local {
+  let next = s;
+  for (const a of actions) {
+    if (a.kind === 'drop') {
+      next = { ...next, queue: next.queue.filter((q) => q.id !== a.id) };
+      continue;
+    }
+    const d = next.queue.find((q) => q.id === a.id);
+    if (!d || d.amount <= 0) continue;
+    const tag = slugTag(a.tag) || d.tag;
+    const expense: Expense = {
+      id: uid(),
+      merchant: d.merchant || 'Payment',
+      amount: d.amount,
+      at: d.at,
+      tag,
+      rail: d.rail,
+      income: d.income,
+      transfer: d.transfer,
+      recurring: null,
+      recurId: null,
+      groupId: null,
+      payerId: null,
+      shares: null,
+      reflect: true,
+      bank: d.bank,
+      account: d.account,
+    };
+    const tags = tag && !next.tags.includes(tag) ? [...next.tags, tag] : next.tags;
+    const key = d.merchant.trim().toLowerCase();
+    const rules = tag && key
+      ? [...next.rules.filter((r) => r.key !== key), { key, tag }]
+      : next.rules;
+    next = enqueue({ ...next, tags, rules, queue: next.queue.filter((q) => q.id !== a.id) }, [{ type: 'expense.upsert', expense }]);
+  }
+  return next;
+}
+
 function addDrafts(s: Local, rows: SmsIn[]) {
   const seen = new Set(s.seen);
   const fresh: Draft[] = [];
+  const recent = [...s.recent];
   for (const row of rows) {
-    const key = `${row.sender}|${row.date}|${row.body.length}`;
+    const key = `${row.sender}\n${row.body}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const d = new Date(row.date);
-    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key);
-    if (draft) fresh.push(draft);
+    const at = d.getTime();
+    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key, s.rules, s.formats, row.id);
+    if (!draft) continue;
+    if (draft.amount > 0 && draft.merchant && isRecentDupe(recent, draft.merchant, draft.amount, at)) continue;
+    if (draft.amount > 0 && draft.merchant) recent.push({ merchant: draft.merchant.toLowerCase(), amount: draft.amount, at });
+    fresh.push(draft);
   }
-  return { next: { ...s, seen: [...seen].slice(-2000), queue: [...fresh, ...s.queue] }, added: fresh.length };
+  return { next: { ...s, seen: [...seen].slice(-2000), recent: recent.slice(-50), queue: [...fresh, ...s.queue] }, added: fresh.length };
 }
 
 type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
@@ -265,25 +420,44 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   hasSample: boolean;
   flash: (m: string) => void;
   setBase: (raw: string) => Promise<string | null>;
+  requestCode: (phone: string, purpose: 'signup' | 'reset') => Promise<string | null>;
   signUp: (name: string, phone: string, password: string) => Promise<string | null>;
   signIn: (phone: string, password: string) => Promise<string | null>;
+  resetPassword: (phone: string, code: string, password: string) => Promise<string | null>;
   startLocal: (name: string) => void;
   connect: () => void;
   cancelConnect: () => void;
   signOut: () => void;
+  confirmPlay: (purchaseToken: string, productId: string) => Promise<string | null>;
+  saveBackup: (password: string) => Promise<string | null>;
+  restoreBackup: (password: string) => Promise<string | null>;
+  downloadAccount: () => Promise<unknown>;
+  deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => Promise<void>;
   setSmsOn: (on: boolean) => void;
   setName: (name: string) => void;
   setDev: (patch: Partial<DevSettings>) => void;
+  createRemote: () => Promise<string | null>;
+  setRemote: (on: boolean) => Promise<string | null>;
+  regenerateRemote: () => Promise<string | null>;
   setBudget: (n: number) => void;
+  setTagBudget: (tag: string, amount: number) => void;
+  setLock: (on: boolean) => void;
+  allowAsk: () => Promise<string | null>;
+  askQuestion: (question: string) => Promise<string>;
+  setDigest: (on: boolean) => void;
+  markMonthly: (merchant: string) => void;
   addTag: (raw: string) => string | null;
   addExpense: (e: NewExpense) => string;
   updateExpense: (e: Expense) => void;
   removeExpense: (id: string) => void;
   removeSettlement: (id: string) => void;
-  confirmDraft: (id: string, opts: { tag: string | null; groupId?: string | null; reflect?: boolean; shares?: Record<string, number> | null; payerId?: string | null }) => void;
+  confirmDraft: (id: string, opts: { tag: string | null; groupId?: string | null; reflect?: boolean; shares?: Record<string, number> | null; payerId?: string | null; payers?: { id: string; amount: number }[]; items?: { name: string; amount: number; memberIds: string[] }[] }) => void;
   ignoreDraft: (id: string) => void;
   skipDraft: (id: string) => void;
+  focusDraft: (id: string) => void;
+  teach: (id: string, amountSlice: string, merchantSlice: string) => boolean;
+  remember: (merchant: string, tag: string | null, groupId?: string | null) => void;
   settle: (s: Omit<Settlement, 'id' | 'sample'>) => void;
   createGroup: (name: string, memberNames: string[], icon?: string) => string;
   groupFromExpense: (expenseId: string, name: string, memberNames: string[], icon?: string) => string | null;
@@ -318,6 +492,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState('');
   const [sync, setSync] = useState<SyncState>('idle');
   const cur = useRef(s);
+  const passRef = useRef<string | null>(null);
+  const holdBackup = useRef(false);
+  const [passOn, setPassOn] = useState(false);
   const busy = useRef(false);
   const again = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -327,13 +504,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [s]);
 
   useEffect(() => {
+    SecureStore.getItemAsync(PASS).then((p) => {
+      if (!p) return;
+      passRef.current = p;
+      setPassOn(true);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !s.token || !passOn || holdBackup.current || !passRef.current) return;
+    const password = passRef.current;
+    const timer = setTimeout(() => {
+      const x = cur.current;
+      if (!x.token || holdBackup.current) return;
+      pushBackup(x, password).catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [ready, s.token, passOn, s.expenses, s.groups, s.settlements, s.people, s.budget, s.tags, s.rules, s.history, s.tagBudgets]);
+
+  useEffect(() => {
     AsyncStorage.getItem(KEY)
       .then((raw) => {
         if (!raw) return;
         const saved = { ...FRESH, ...(JSON.parse(raw) as Partial<Local>) };
+        saved.dev = { ...FRESH.dev, ...saved.dev };
         // An older build saved localhost as the server. Without an account there, move to the real server.
         if (!saved.token && isLocalHost(saved.base) && !isLocalHost(DEFAULT_API)) saved.base = DEFAULT_API;
-        setS(saved);
+        // Older builds shipped a fixed tag list. Drop any of those the user never put on an expense or a budget.
+        if (saved.tags.length === TAGS.length && saved.tags.every((t, i) => t === TAGS[i])) {
+          const used = new Set<string>();
+          for (const e of saved.expenses) if (e.tag) used.add(e.tag);
+          for (const q of saved.queue) if (q.tag) used.add(q.tag);
+          for (const [t, n] of Object.entries(saved.tagBudgets)) if (n > 0) used.add(t);
+          saved.tags = [...used];
+        }
+        setS(reparseQueue(saved));
       })
       .catch(() => {})
       .finally(() => setReady(true));
@@ -358,10 +563,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         queue: x.queue,
         seen: x.seen,
         smsOn: x.smsOn,
+        rules: x.rules,
+        formats: x.formats,
+        recent: x.recent,
         dev: x.dev,
         tags: x.tags,
         budget: x.budget,
         history: x.history,
+        tagBudgets: x.tagBudgets,
+        alerted: x.alerted,
+        lock: x.lock,
         expenses: x.expenses.filter((e) => !e.groupId),
         you: x.you,
         local: true,
@@ -415,30 +626,67 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    const dropPass = () => {
+      passRef.current = null;
+      setPassOn(false);
+      SecureStore.deleteItemAsync(PASS).catch(() => {});
+    };
+
     const authed = async (path: string, body: Record<string, string>) => {
-      const base = cur.current.base;
+      const before = cur.current;
       try {
-        const res = await call<{ token: string; you: Remote['you'] }>(base, null, 'POST', path, body);
-        setS((x) => {
-          if (x.local) {
-            const mine = remapYou(x, res.you.id);
-            const connected: Local = {
-              ...mine, base, token: res.token, you: person(res.you.id, res.you.name), phone: res.you.phone,
-              local: false, connecting: false, outbox: [],
-            };
-            return enqueue(connected, snapshotOps(connected));
-          }
-          const same = x.you.id === res.you.id;
-          return {
-            ...(same ? x : { ...FRESH, queue: x.queue, seen: x.seen, smsOn: x.smsOn }),
-            base,
+        const res = await call<{ token: string; you: Remote['you'] }>(before.base, null, 'POST', path, body);
+        let next: Local;
+        if (before.local) {
+          const mine = remapYou(before, res.you.id);
+          const connected: Local = {
+            ...mine, base: before.base, token: res.token, you: person(res.you.id, res.you.name), phone: res.you.phone,
+            local: false, connecting: false, outbox: [],
+          };
+          next = enqueue(connected, snapshotOps(connected));
+        } else {
+          const same = before.you.id === res.you.id;
+          next = {
+            ...(same ? before : { ...FRESH, queue: before.queue, seen: before.seen, smsOn: before.smsOn, rules: before.rules, formats: before.formats, recent: before.recent, dev: before.dev }),
+            base: before.base,
             token: res.token,
             you: person(res.you.id, res.you.name),
             phone: res.you.phone,
           };
-        });
+        }
+        const password = body.password;
+        holdBackup.current = true;
+        let opened = false;
+        let missing = false;
+        if (password) {
+          try {
+            const packed = await call<{ wrap: string; blob: string }>(before.base, res.token, 'GET', '/backup');
+            next = absorb(next, await openBackup(packed.wrap, packed.blob, password));
+            opened = true;
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 404) missing = true;
+          }
+        }
+        cur.current = next;
+        setS(next);
+        const empty = !next.expenses.length && !next.groups.length;
+        if (password) {
+          passRef.current = password;
+          setPassOn(true);
+          SecureStore.setItemAsync(PASS, password).catch(() => {});
+          // A blob sealed with some other password is left alone when this phone has nothing to replace it with.
+          if (opened || missing || !empty) {
+            try {
+              await pushBackup(next, password);
+            } catch {
+              /* Not Pro yet, or offline. The watcher retries after the next change. */
+            }
+          }
+        }
+        holdBackup.current = false;
         return null;
       } catch (err) {
+        holdBackup.current = false;
         return err instanceof Error ? err.message : 'Something went wrong';
       }
     };
@@ -467,8 +715,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cur.current = { ...cur.current, base };
         return null;
       },
+      requestCode: async (phone, purpose) => {
+        try {
+          await call(cur.current.base, null, 'POST', '/auth/otp', { phone, purpose });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not send the code';
+        }
+      },
       signUp: (name, phone, password) => authed('/auth/signup', { name, phone, password }),
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
+      resetPassword: async (phone, code, password) => {
+        try {
+          await call(cur.current.base, null, 'POST', '/auth/reset', { phone, otp: code, password });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not reset the password';
+        }
+      },
       startLocal: (name) =>
         setS((x) =>
           x.local
@@ -477,8 +741,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       connect: () => setS((x) => (x.local ? { ...x, connecting: true } : x)),
       cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
+      saveBackup: async (password) => {
+        const x = cur.current;
+        try {
+          const packed = await sealBackup({
+            expenses: x.expenses, settlements: x.settlements, groups: x.groups, people: x.people,
+            budget: x.budget, tags: x.tags, rules: x.rules, history: x.history,
+          }, password);
+          await call(x.base, x.token, 'POST', '/backup', packed);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not back up';
+        }
+      },
+      restoreBackup: async (password) => {
+        const x = cur.current;
+        try {
+          const packed = await call<{ wrap: string; blob: string }>(x.base, x.token, 'GET', '/backup');
+          const data = await openBackup(packed.wrap, packed.blob, password);
+          setS((cur) => ({
+            ...cur,
+            expenses: [...data.expenses.filter((e) => !e.groupId), ...cur.expenses.filter((e) => e.groupId)],
+            budget: data.budget,
+            tags: data.tags,
+            rules: data.rules,
+            history: data.history,
+            groups: [...cur.groups, ...data.groups.filter((g) => !cur.groups.some((h) => h.id === g.id))],
+            people: [...cur.people, ...data.people.filter((p) => p.id !== cur.you.id && !cur.people.some((h) => h.id === p.id))],
+            settlements: [...cur.settlements, ...data.settlements.filter((s) => !cur.settlements.some((h) => h.id === s.id))],
+          }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not restore';
+        }
+      },
+      confirmPlay: async (purchaseToken, productId) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/billing/play', { purchaseToken, productId });
+          await syncNow();
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not verify the purchase';
+        }
+      },
+      downloadAccount: () => call(cur.current.base, cur.current.token, 'GET', '/account/export'),
+      deleteAccount: async (password) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/account/delete', { password });
+          dropPass();
+          signOutLocal();
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not delete the account';
+        }
+      },
       signOut: () => {
         const { base, token } = cur.current;
+        dropPass();
         if (token) {
           call(base, token, 'POST', '/auth/logout').catch(() => {});
           signOutLocal();
@@ -492,7 +811,80 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (n && n !== cur.current.you.name) commit([{ type: 'me.set', name: n }]);
       },
       setDev: (patch) => setS((x) => ({ ...x, dev: { ...x.dev, ...patch } })),
+      createRemote: async () => {
+        try {
+          const res = await call<{ token: string; publicId: string }>(cur.current.base, cur.current.token, 'POST', '/mcp/create', { confirm: true });
+          setS((x) => ({ ...x, dev: { ...x.dev, remote: true, remoteId: res.publicId, remoteToken: res.token } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not create the remote MCP';
+        }
+      },
+      setRemote: async (on) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', on ? '/mcp/enable' : '/mcp/disable');
+          setS((x) => ({ ...x, dev: { ...x.dev, remote: on } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not update the remote MCP';
+        }
+      },
+      regenerateRemote: async () => {
+        try {
+          const res = await call<{ token: string; publicId: string }>(cur.current.base, cur.current.token, 'POST', '/mcp/regenerate');
+          setS((x) => ({ ...x, dev: { ...x.dev, remoteId: res.publicId, remoteToken: res.token } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not replace the token';
+        }
+      },
+      setLock: (lock) => setS((x) => ({ ...x, lock })),
+      setDigest: (digest) => setS((x) => ({ ...x, digest })),
+      askQuestion: async (question) => {
+        const x = cur.current;
+        let history: { role: string; parts: Record<string, unknown>[] }[] = [];
+        let text = '';
+        for (let i = 0; i < 4; i++) {
+          const res = await call<{ history?: typeof history; text?: string; toolCalls?: { name: string; args: Record<string, unknown> }[] }>(
+            x.base, x.token, 'POST', '/ai/ask', { consent: true, question: i === 0 ? question : undefined, history },
+          );
+          history = res.history ?? history;
+          if (res.text) text = res.text;
+          const calls = res.toolCalls ?? [];
+          if (!calls.length) break;
+          const data = { you: x.you, people: x.people, groups: x.groups, expenses: x.expenses, settlements: x.settlements, budget: x.budget };
+          const parts = calls.map((tool) => {
+            const ran = handleMcp(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: tool.args } }), data);
+            return { functionResponse: { name: tool.name, response: JSON.parse(ran.body) } };
+          });
+          history = [...history, { role: 'user', parts }];
+        }
+        return text || 'No answer';
+      },
+      allowAsk: async () => {
+        setS((x) => ({ ...x, askOk: true }));
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/ai/ask', { consent: true });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not save';
+        }
+      },
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
+      setTagBudget: (tag, amount) => {
+        const tagBudgets = { ...cur.current.tagBudgets };
+        if (amount > 0) tagBudgets[tag] = amount;
+        else delete tagBudgets[tag];
+        commit([{ type: 'prefs.set', prefs: { tagBudgets } }]);
+      },
+      markMonthly: (merchant) => {
+        const key = merchant.toLowerCase();
+        const latest = cur.current.expenses
+          .filter((e) => !e.groupId && !e.transfer && !e.income && e.merchant.toLowerCase() === key)
+          .sort((a, b) => b.at.localeCompare(a.at))[0];
+        if (!latest) return;
+        commit([{ type: 'expense.upsert', expense: { ...latest, recurring: 'monthly', recurId: latest.recurId ?? `sub-${key.replace(/[^a-z0-9]+/g, '-')}` } }]);
+      },
       addTag: (raw) => {
         const tag = slugTag(raw);
         if (!tag) return null;
@@ -513,7 +905,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       confirmDraft: (id, opts) => {
         const x = cur.current;
         const d = x.queue.find((q) => q.id === id);
-        if (!d) return;
+        if (!d || d.amount <= 0) return;
         const group = opts.groupId ? x.groups.find((g) => g.id === opts.groupId) : null;
         const members = group ? [x.you.id, ...group.memberIds] : [];
         const expense: Expense = {
@@ -530,6 +922,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           groupId: group?.id ?? null,
           payerId: group ? (opts.payerId ?? x.you.id) : null,
           shares: group ? (opts.shares ?? equalShares(d.amount, members)) : null,
+          payers: opts.payers,
+          items: opts.items,
           reflect: group ? opts.reflect !== false : true,
           bank: d.bank,
           account: d.account,
@@ -537,7 +931,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         };
         const ops: Op[] = [{ type: 'expense.upsert', expense }];
         if (opts.tag && !x.tags.includes(opts.tag)) ops.push({ type: 'prefs.set', prefs: { tags: [...x.tags, opts.tag] } });
-        setS((y) => ({ ...enqueue(y, ops), queue: y.queue.filter((q) => q.id !== id) }));
+        const key = d.merchant.toLowerCase();
+        const rules = opts.tag || opts.groupId
+          ? [...x.rules.filter((r) => r.key !== key), { key, ...(opts.tag ? { tag: opts.tag } : {}), ...(opts.groupId ? { groupId: opts.groupId } : {}) }]
+          : x.rules;
+        setS((y) => ({ ...enqueue(y, ops), rules, queue: y.queue.filter((q) => q.id !== id) }));
       },
       ignoreDraft: (id) => setS((x) => ({ ...x, queue: x.queue.filter((q) => q.id !== id) })),
       skipDraft: (id) => setS((x) => {
@@ -547,6 +945,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const [item] = queue.splice(i, 1);
         return { ...x, queue: [...queue, item] };
       }),
+      focusDraft: (id) => setS((x) => {
+        const i = x.queue.findIndex((q) => q.id === id);
+        if (i <= 0) return x;
+        const queue = [...x.queue];
+        const [item] = queue.splice(i, 1);
+        return { ...x, queue: [item, ...queue] };
+      }),
+      teach: (id, amountSlice, merchantSlice) => {
+        const x = cur.current;
+        const d = x.queue.find((q) => q.id === id);
+        const amount = d && amountSlice ? spanContext(d.body, amountSlice) : null;
+        const money = amountSlice ? readMoney(amountSlice) : null;
+        if (!d || !amount || !money) return false;
+        const merchant = merchantSlice ? spanContext(d.body, merchantSlice) : null;
+        const formats = [
+          ...x.formats.filter((f) => f.sender !== d.sender),
+          {
+            sender: d.sender,
+            amountBefore: amount.before,
+            amountAfter: amount.after,
+            merchantBefore: merchant?.before ?? '',
+            merchantAfter: merchant?.after ?? '',
+          },
+        ];
+        const parsed = parseWithRules(d.sender, d.body, formats, x.rules);
+        const amountN = parsed?.amount || money;
+        const merchantName = merchantSlice
+          ? cleanMerchant(merchantSlice)
+          : (parsed?.merchant && parsed.merchant !== 'Payment' ? parsed.merchant : 'Payment');
+        setS((y) => ({
+          ...y,
+          formats,
+          queue: y.queue.map((q) => q.id === id ? {
+            ...q,
+            bank: parsed?.bank ?? q.bank,
+            amount: amountN,
+            merchant: merchantName,
+            tag: parsed?.tag ?? q.tag,
+            rail: parsed?.rail ?? guessRail(d.body),
+            at: parsed?.at ?? q.at,
+            account: parsed?.account ?? q.account,
+          } : q),
+        }));
+        return true;
+      },
+      remember: (merchant, tag, groupId) => {
+        const key = merchant.trim().toLowerCase();
+        if (!key || (!tag && !groupId)) return;
+        setS((x) => ({
+          ...x,
+          rules: [...x.rules.filter((r) => r.key !== key), { key, ...(tag ? { tag } : {}), ...(groupId ? { groupId } : {}) }],
+        }));
+      },
       settle: (row) => {
         commit([{ type: 'settlement.upsert', settlement: { ...row, id: uid() } }]);
         flash('Settlement recorded');
@@ -673,7 +1124,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const key = `text|${sender}|${body.slice(0, 80)}`;
         const x = cur.current;
         if (x.seen.includes(key)) return x.queue.some((q) => q.key === key);
-        const draft = draftFrom(sender, body, new Date().toISOString(), key);
+        const draft = draftFrom(sender, body, new Date().toISOString(), key, x.rules, x.formats);
         setS((y) => ({ ...y, seen: [...y.seen, key], queue: draft ? [draft, ...y.queue] : y.queue }));
         return !!draft;
       },
@@ -690,7 +1141,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         for (const expense of data.expenses) ops.push({ type: 'expense.upsert', expense });
         for (const settlement of data.settlements) ops.push({ type: 'settlement.upsert', settlement });
-        ops.push({ type: 'prefs.set', prefs: { history: [...x.history.filter((h) => !h.sample), ...data.history], ...(x.budget ? {} : { budget: data.budget }) } });
+        const sampleTags = [...new Set([...data.expenses.map((e) => e.tag), ...data.queue.map((q) => q.tag)].filter((t): t is string => !!t))];
+        ops.push({ type: 'prefs.set', prefs: { history: [...x.history.filter((h) => !h.sample), ...data.history], tags: [...new Set([...x.tags, ...sampleTags])], ...(x.budget ? {} : { budget: data.budget }) } });
         setS((y) => ({ ...enqueue(y, ops), queue: [...y.queue.filter((q) => !q.sample), ...data.queue] }));
         flash('Sample data added');
       },
@@ -714,29 +1166,134 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready, s.token, s.outbox, api]);
 
   useEffect(() => {
+    if (!ready) return;
+    const tags: Record<string, string> = {};
+    for (const r of s.rules) if (r.tag) tags[r.key] = r.tag;
+    syncSmsBridge(s.smsOn, tags).catch(() => {});
+  }, [ready, s.smsOn, s.rules]);
+
+  useEffect(() => {
     if (!ready || !(s.token || (s.local && !s.connecting))) return;
     const scan = async () => {
       if (!cur.current.smsOn) return;
+      const live = await drainDeviceSms();
+      const actions = await drainFileActions();
       const res = await readDeviceSms(80, true);
-      if (res.rows.length) setS((x) => addDrafts(x, res.rows).next);
+      if (!live.length && !actions.length && !res.rows.length) return;
+      setS((x) => {
+        let next = live.length ? addDrafts(x, live).next : x;
+        if (res.rows.length) next = addDrafts(next, res.rows).next;
+        return actions.length ? applyFileActions(next, actions) : next;
+      });
     };
     api.syncNow();
     scan();
-    // ponytail: 20s polling, fine for small groups. Switch to server-sent events if group edits must feel instant.
-    const poll = setInterval(() => {
-      if (AppState.currentState === 'active') api.syncNow();
-    }, 20000);
+    const offSms = onBankSms(() => {
+      scan();
+    });
+    let stopped = false;
+    const wait = async () => {
+      while (!stopped) {
+        const x = cur.current;
+        if (!x.token || AppState.currentState !== 'active') {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+        try {
+          await call(x.base, x.token, 'GET', `/sync/wait?after=${x.syncedAt ?? 0}`, undefined, 30_000);
+          await api.syncNow();
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+    };
+    void wait();
+    const nudge = () => {
+      const x = cur.current;
+      const today = new Date().toISOString().slice(0, 10);
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -dust).sort((a, b) => a.net - b.net);
+      const top = owed[0];
+      if (!top) return;
+      const stamp = `${top.id}:${Math.round(-top.net)}`;
+      if (x.nudgeDay === today || x.nudgeStamp === stamp) return;
+      const lines = whyYouPay(x.you.id, top.id, x.expenses, x.settlements).filter((line) => line.direction === 'owe').slice(0, 2).map((line) => line.label);
+      showNote(`You owe ${personName(x.people, x.you, top.id)} ₹${Math.round(-top.net)}`, lines.join(' · ') || 'Open balances', 9);
+      setS((cur) => ({ ...cur, nudgeDay: today, nudgeStamp: stamp }));
+    };
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       api.syncNow();
       scan();
+      nudge();
     });
     return () => {
-      clearInterval(poll);
+      stopped = true;
       sub.remove();
+      offSms();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, s.token, s.local, s.connecting]);
+
+  useEffect(() => {
+    if (!ready || !s.token || !s.pro || !s.dev.remote) return;
+    const t = setTimeout(() => {
+      const x = cur.current;
+      const body = {
+        you: x.you,
+        people: x.people.map((p) => ({ id: p.id, name: p.name, initials: p.initials })),
+        groups: x.groups.map((g) => ({ id: g.id, name: g.name, icon: g.icon, note: g.note, memberIds: g.memberIds })),
+        expenses: x.expenses.filter((e) => !e.sample).map((e) => ({
+          id: e.id, merchant: e.merchant, amount: e.amount, at: e.at, tag: e.tag, rail: e.rail,
+          income: !!e.income, transfer: !!e.transfer, groupId: e.groupId, payerId: e.payerId, shares: e.shares, payers: e.payers,
+        })),
+        settlements: x.settlements,
+        budget: x.budget,
+      };
+      call(x.base, x.token, 'POST', '/mcp/snapshot', body).catch(() => {});
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [ready, s.token, s.pro, s.dev.remote, s.expenses, s.groups, s.people, s.settlements, s.budget]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const now = new Date();
+    if (now.getDay() !== 0) return;
+    const day = now.toISOString().slice(0, 10);
+    if (s.sunday === day) return;
+    const t = setTimeout(() => {
+      const x = cur.current;
+      const bounds = monthBounds(now.getFullYear(), now.getMonth() + 1);
+      const spent = spendIn(x.expenses, x.settlements, x.you.id, bounds.from, bounds.to);
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -dust).sort((a, b) => a.net - b.net)[0];
+      const left = Math.round((x.budget || 0) - spent.total);
+      showNote('This Sunday', `Spent ₹${Math.round(spent.total)}. Left ₹${left}.${owed ? ` You owe ₹${Math.round(-owed.net)}.` : ''}`, 7);
+      setS((cur) => ({ ...cur, sunday: day }));
+      if (x.pro && x.digest && x.askOk && x.token) {
+        call<{ text?: string }>(x.base, x.token, 'POST', '/ai/ask', { consent: true, question: 'In one short paragraph, how is this month going?' })
+          .then((res) => { if (res.text) showNote('Sunday digest', res.text.slice(0, 180), 8); })
+          .catch(() => {});
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [ready, s.sunday, s.expenses, s.budget]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const from = `${month}-01`;
+    const to = `${month}-31`;
+    const fresh = Object.entries(s.tagBudgets).filter(([tag, limit]) => {
+      const key = `${month}:${tag}`;
+      return limit > 0 && !s.alerted.includes(key) && tagSpend(s.expenses, s.you.id, tag, from, to) >= limit;
+    });
+    if (!fresh.length) return;
+    const t = setTimeout(() => {
+      setS((x) => ({ ...x, alerted: [...x.alerted, ...fresh.map(([tag]) => `${month}:${tag}`)].slice(-200) }));
+      for (const [tag, limit] of fresh) showNote(`#${tag} budget`, `Spending on ${tag} crossed ₹${limit} this month.`, tag.length);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [ready, s.expenses, s.tagBudgets, s.alerted, s.you.id]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

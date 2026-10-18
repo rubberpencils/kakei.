@@ -42,25 +42,29 @@ A privacy focused expense ledger that turns bank SMS into spends, then splits th
 - Groups can be shared by code, so friends see the same balances.
 
 **Typing**
-- Kakei draws its own keyboard, so fields look and behave the same on every phone. Number pad for amounts, full keyboard for text, with a caret you can place anywhere by tapping or with the arrow keys.
-- Typing is springy and interruptible. Keys dip under your finger, the caret settles on each letter, and reduced motion turns it all off.
+- Amounts on the log screen use the built-in number pad. Everything else uses the phone keyboard, so the back gesture dismisses the keyboard.
 
 **Developer**
 - Turn the phone into a read-only [MCP](https://modelcontextprotocol.io) server so Cursor, Claude Desktop or any HTTP MCP client can ask about your spending. See [MCP server on your phone](#mcp-server-on-your-phone).
+
+## Free and Pro
+
+One Play build. Self-hosting sets every account to Pro and never opens the paywall, so BillingClient is not constructed. The hosted server sets `KAKEI_EVERYONE_PRO=false` and `GOOGLE_SA_JSON`. Without that JSON, `POST /billing/play` answers 501. A sideloaded APK cannot finish a Play purchase.
+
+Free, including with no account: bank SMS, review, budgets, splits, export, lock, and the cash widget. An account is a phone number and a password. Resetting that password can send a code. Pro, because it costs hosting or a paid model: the encrypted backup, Ask, the Sunday AI digest, and remote MCP. A self-hosted server marks every account Pro, and the profile shows a Pro badge.
 
 ## Where your data lives
 
 Kakei is local first. It works fully with no account and no server.
 
-| On the phone only | On the server, only if you share a group |
-| --- | --- |
-| Personal expenses, budget, tags, monthly history | Groups and the people in them |
-| Bank SMS text, bank names and account digits | Group expenses and settlements |
-| Anything in local mode | Your name and phone number, for friends to find you |
+| On the phone only | Sealed groups the server can read | Encrypted backup | Remote MCP snapshot |
+| --- | --- | --- | --- |
+| Personal expenses, budget, tags, history | Groups, members, group expenses, settlements | The whole ledger, sealed with your account password. Logging in on a new phone restores it | Amounts, merchants, tags, dates, shares |
+| Bank SMS, account digits, bank names | Your name and phone, so friends can find you | The server cannot read this blob | No SMS text, account digits or bank names |
 
 - If the server is down or you are offline, Kakei keeps working. Group changes queue on the phone and send when it is back.
-- Signing out keeps your own spends, budget and tags. Only the shared groups leave the phone, and they come back when you log in.
-- Shared expenses and settlements are sealed on the server with AES-256-GCM. Account and bank digits are never sent. Passwords are hashed with scrypt, and traffic is HTTPS.
+- Signing out keeps your own spends, budget and tags. Only the shared groups leave the phone. Log in again, on this phone or a new one, and the backup plus the groups come back.
+- Shared expenses and settlements are sealed on the server with AES-256-GCM. Account digits and bank names are not in that sealed copy. They can sit inside the backup blob, which the server cannot read. Passwords are hashed with scrypt, and traffic is HTTPS.
 - Older versions uploaded personal spends. On the first sync after updating, the phone asks the server to forget them, but only once the phone holds its own copy.
 
 The onboarding account step and Profile explain the same thing in the app.
@@ -85,7 +89,7 @@ Kakei does not move money. UPI blocks one-tap payments from an app to a person's
 
 ```
 src/app          screens (every file is a route)
-src/components   keyboard, input, shared UI, privacy note
+src/components   input, shared UI, privacy note
 src/lib          store, parser, ledger, keyboard logic, sync client
 modules/         native SMS and MCP module
 server/src       API, SQLite, encryption
@@ -113,7 +117,22 @@ npm run server
 
 Listens on `0.0.0.0:4000`. The log line `phone URL:` is the address a phone on the same Wi-Fi should use. Reload on changes with `npm --prefix server run dev`.
 
-Settings are in `server/.env.example`. Set `KAKEI_DATA_KEY` so the data key never sits beside the database. Without it the server makes `data.key` next to the database, and you must keep a copy. Every account on a self-hosted server is pro. The hosted server sets `KAKEI_EVERYONE_PRO=false` and decides pro per account. The app has no paywall of its own.
+Copy `server/.env.example` to `server/.env`. You only have to set a key if you care about moving the database later.
+
+| Variable | Self-host | Hosted kakei. |
+| --- | --- | --- |
+| `KAKEI_EVERYONE_PRO` | `true` (the default). Every account is Pro. The app shows the Pro badge and does not open the paywall. | `false` |
+| `KAKEI_DATA_KEY` | Optional. 32 bytes, base64 or hex. Unset, the server writes `data.key` next to the database. Keep a copy or the sealed groups cannot be read. | Required, and backed up |
+| `GOOGLE_SA_JSON` | Leave unset. `POST /billing/play` answers 501. | Play service-account JSON, or a path to that file |
+| `SMS_OTP_URL` | Leave unset. Password reset prints the code in the server log. Signup does not send a code. | URL that accepts `POST { phone, code }` |
+| `GEMINI_API_KEY` | Optional. Unset, Ask answers 501. | Set, for Ask and the Sunday digest |
+| `PORT` / `HOST` | `4000` and `0.0.0.0` so a phone on the same Wi-Fi can connect | Behind your proxy, `HOST=127.0.0.1` |
+| `DB_PATH` | `./data/kakei.db` | Wherever you keep the SQLite file |
+| `CORS_ORIGIN` | `*` is fine locally | Your web origin |
+
+On the phone, account screen, tap **Change** and enter the `phone URL:` from the server log, for example `192.168.1.20:4000`. A build does not have to be remade for that. USB instead of Wi-Fi: `adb reverse tcp:4000 tcp:4000`, then use `localhost:4000`.
+
+The Play build is one APK on an internal track. A sideloaded APK cannot finish a Play purchase. Contributors build this same source and point it at their server.
 
 ### 3. Start the app
 
@@ -171,7 +190,7 @@ The phone is not opened to the public internet. Mobile networks block inbound co
 
 No. Kakei starts in **local mode**: no account, no server. Spending, SMS import, quick splits, card bills and the MCP server all work from the phone, and nothing is sent anywhere.
 
-The server is only for sharing a group with friends so every phone shows the same balances. Turn it on in Profile > **Sync with friends**. Sharing without any server would need the phones to find each other directly (Bluetooth or a QR handshake). That is not built.
+The server is for sharing a group, and for the encrypted backup that puts the ledger back when you log in on a new phone or after a reinstall. Turn it on in Profile > **Sync with friends**. The backup is sealed with the account password. The server stores the blob and cannot read it.
 
 ## SMS module
 

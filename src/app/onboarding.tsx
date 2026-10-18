@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -17,6 +18,7 @@ import { Back, Body, Button, buzz, Field, Ghost, Icon, Press, Word, Wordmark, us
 import { PrivacyNote } from '@/components/privacy';
 import { DEFAULT_API, isOfficial, serverName } from '@/lib/api';
 import { inr } from '@/lib/format';
+import { askNotify } from '@/lib/notify';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
@@ -51,6 +53,7 @@ export default function Onboarding() {
     else {
       const n = store.ingest(result.rows);
       store.setSmsOn(true);
+      await askNotify();
       store.flash(n ? `${n} bank messages ready to review` : 'No bank messages yet');
     }
     go(2);
@@ -294,6 +297,7 @@ function Account({
         label={mode === 'signup' ? 'I already have an account' : 'New here? Make an account'}
         onPress={() => { setError(null); setMode(mode === 'signup' ? 'login' : 'signup'); }}
       />
+      {mode === 'login' ? <Ghost label="Forgot password" onPress={() => router.push('/reset' as never)} /> : null}
       <Ghost label={store.local ? 'Not now, keep it on this phone' : 'Skip the account, keep it on this phone'} onPress={keepLocal} />
     </ScrollView>
   );

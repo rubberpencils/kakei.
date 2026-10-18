@@ -4,8 +4,8 @@ import { ScrollView, Text, View } from 'react-native';
 import Animated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, Icon, Press, Segmented, Word, usePalette } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { Avatar, Icon, Press, Segmented, SwipeShift, Word, usePalette } from '@/components/ui';
+import { dust, inr } from '@/lib/format';
 import { friendBalances, groupDebts, personName, youNet } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -59,6 +59,10 @@ export default function Groups() {
         <Segmented<Mode> value={view} onChange={setView} options={[{ id: 'groups', label: 'Groups' }, { id: 'splits', label: 'Splits' }, { id: 'friends', label: 'Friends' }]} />
       </View>
 
+      <SwipeShift
+        onNext={() => setView((v) => (v === 'groups' ? 'splits' : v === 'splits' ? 'friends' : 'groups'))}
+        onPrev={() => setView((v) => (v === 'friends' ? 'splits' : v === 'splits' ? 'groups' : 'friends'))}
+      >
       <Animated.View key={view} entering={reduce ? undefined : FadeIn.duration(180)} style={{ marginTop: 8 }}>
         {view === 'splits' ? (
           <Press onPress={() => router.push('/quick-split')} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 }}>
@@ -104,7 +108,7 @@ export default function Groups() {
             })
           : friends.map((f) => {
               const p = store.people.find((x) => x.id === f.id);
-              const color = f.net > 0.5 ? c.pos : f.net < -0.5 ? c.neg : c.mut;
+              const color = f.net > dust ? c.pos : f.net < -dust ? c.neg : c.mut;
               return (
                 <Press key={f.id} onPress={() => router.push({ pathname: '/person/[id]', params: { id: f.id } })} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 }}>
                   <Avatar id={f.id} label={p?.initials ?? '?'} size={42} />
@@ -115,15 +119,15 @@ export default function Groups() {
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ fontFamily: font.body, fontSize: 11.5, color }}>{f.net > 0.5 ? 'owes you' : f.net < -0.5 ? 'you owe' : 'settled up'}</Text>
-                    {Math.abs(f.net) > 0.5 ? <Text style={{ fontFamily: font.displaySm, fontSize: 16, color }}>₹{inr(Math.abs(f.net))}</Text> : null}
+                    <Text style={{ fontFamily: font.body, fontSize: 11.5, color }}>{f.net > dust ? 'owes you' : f.net < -dust ? 'you owe' : 'settled up'}</Text>
+                    {Math.abs(f.net) > dust ? <Text style={{ fontFamily: font.displaySm, fontSize: 16, color }}>₹{inr(Math.abs(f.net))}</Text> : null}
                   </View>
                 </Press>
               );
             })}
       </Animated.View>
 
-      {store.groups.length === 0 ? (
+      {view === 'groups' && real.length === 0 ? (
         <View style={{ marginTop: 40, alignItems: 'flex-start', gap: 10 }}>
           <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: c.sub, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="account-group-outline" size={28} />
@@ -138,6 +142,18 @@ export default function Groups() {
           </Press>
         </View>
       ) : null}
+      {view === 'friends' && friends.length === 0 ? (
+        <View style={{ marginTop: 28, alignItems: 'flex-start', gap: 10 }}>
+          <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: c.sub, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="account-outline" size={28} />
+          </View>
+          <Word size={20}>No friends yet</Word>
+          <Text style={{ fontFamily: font.body, color: c.mut, fontSize: 14, lineHeight: 20 }}>
+            Share an expense, then invite them with the group code. They show up here once you both owe something.
+          </Text>
+        </View>
+      ) : null}
+      </SwipeShift>
     </ScrollView>
   );
 }

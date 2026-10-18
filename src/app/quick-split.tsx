@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '@/components/input';
 import { Back, Button, buzz, goBack, Icon, Press, TagPicker, usePalette, Word } from '@/components/ui';
-import { inr, uid } from '@/lib/format';
+import { dust, inr, uid } from '@/lib/format';
 import { equalShares, percentShares, round2 } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -49,7 +49,7 @@ export default function QuickSplit() {
       : Object.fromEntries(included.map((id) => [id, Number(exact[id]) || 0]));
   const sum = Object.values(shares).reduce((a, b) => a + b, 0);
   const pctSum = included.reduce((a, id) => a + pctOf(id), 0);
-  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < 0.5 : Math.abs(pctSum - 100) < 0.5);
+  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < dust : Math.abs(pctSum - 100) < 0.5);
   const ok = amount > 0 && picked.length > 0 && included.length > 0 && balanced && (fixed || desc.trim().length > 0);
   const status = !picked.length
     ? 'Pick at least one person'

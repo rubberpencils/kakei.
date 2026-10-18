@@ -1,4 +1,7 @@
+import * as Clipboard from 'expo-clipboard';
+import { File, Paths } from 'expo-file-system';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useState } from 'react';
 import { ScrollView, Share, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +42,20 @@ export default function GroupSettings() {
     store.addMember(group.id, who);
     buzz();
     setWho('');
+  };
+  const copyPage = () => {
+    if (!group.code) return store.flash('The page appears once the group reaches the server');
+    Clipboard.setStringAsync(`${store.base}/view/${group.code}`);
+    store.flash('Link copied');
+  };
+  const shareTrip = async () => {
+    const total = store.expenses.filter((e) => e.groupId === group.id && !e.transfer && !e.income).reduce((sum, e) => sum + e.amount, 0);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420"><rect width="800" height="420" fill="#16141a"/><text x="48" y="120" fill="#fffdf9" font-size="64" font-family="sans-serif">${group.name.replace(/[<>&]/g, '')}</text><text x="48" y="200" fill="#d8d0c2" font-size="28" font-family="sans-serif">${members.length} people</text><text x="48" y="280" fill="#fffdf9" font-size="42" font-family="sans-serif">₹${Math.round(total)}</text></svg>`;
+    const file = new File(Paths.cache, 'kakei-trip.svg');
+    if (file.exists) file.delete();
+    file.create();
+    file.write(svg);
+    await Sharing.shareAsync(file.uri, { mimeType: 'image/svg+xml', dialogTitle: group.name });
   };
   const share = () => {
     if (!group.code) return store.flash(store.signedIn ? 'The code appears once the group reaches the server' : 'Turn on sync in Profile to invite friends');
@@ -129,6 +146,12 @@ export default function GroupSettings() {
       <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8, lineHeight: 18 }}>
         Friends open Groups, tap Join with code, then pick their name so past splits become theirs.
       </Text>
+      <Press onPress={copyPage} style={{ marginTop: 16 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.fg }}>Copy a link for someone without the app</Text>
+      </Press>
+      <Press onPress={() => shareTrip().catch(() => store.flash('Could not share the trip card'))} style={{ marginTop: 12 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.fg }}>Share a trip card</Text>
+      </Press>
 
       {group.owner ? (
         <Press onPress={remove} style={{ marginTop: 36, height: 50, borderRadius: 25, borderWidth: 1, borderColor: c.neg, alignItems: 'center', justifyContent: 'center' }}>

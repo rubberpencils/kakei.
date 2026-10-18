@@ -40,6 +40,8 @@ export type Expense = {
   bank?: string | null;
   note?: string;
   sample?: boolean;
+  payers?: { id: string; amount: number }[];
+  items?: { name: string; amount: number; memberIds: string[] }[];
 };
 
 export type Settlement = {

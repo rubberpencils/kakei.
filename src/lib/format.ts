@@ -5,8 +5,13 @@ const MONTHS = [
 const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function inr(n: number) {
-  return Math.round(Math.abs(n)).toLocaleString('en-IN');
+  const v = Math.round(Math.abs(n) * 100) / 100;
+  const paise = Math.round(v * 100) % 100 !== 0;
+  return v.toLocaleString('en-IN', { minimumFractionDigits: paise ? 2 : 0, maximumFractionDigits: 2 });
 }
+
+/** Anything smaller than half a paisa is float dust, not money. */
+export const dust = 0.005;
 
 /** Like `inr`, but keeps the paise when there are any. For amounts someone typed, where rounding would be wrong. */
 export function inrExact(n: number) {

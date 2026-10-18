@@ -8,7 +8,8 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 }
 
 const db = openDb(':memory:');
-const server = createApp(db, { cors: '*' });
+const codes = new Map<string, string>();
+const server = createApp(db, { cors: '*', sendOtp: (phone, code) => { codes.set(phone, code); } });
 await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -21,15 +22,20 @@ async function call(method: string, path: string, token: string | null, body?: u
   return { status: res.status, json: (await res.json()) as any };
 }
 
+async function signup(name: string, phone: string, password: string) {
+  return call('POST', '/auth/signup', null, { name, phone, password });
+}
+
 try {
-  const a = await call('POST', '/auth/signup', null, { name: 'Ananya', phone: '98765 43210', password: 'secret1' });
+  const a = await signup('Ananya', '98765 43210', 'secret1');
   eq(a.status, 200, 'signup a');
-  const b = await call('POST', '/auth/signup', null, { name: 'Aarav', phone: '9123456780', password: 'secret2' });
+  const b = await signup('Aarav', '9123456780', 'secret2');
   const A = a.json.token as string;
   const B = b.json.token as string;
   const aid = a.json.you.id as string;
   const bid = b.json.you.id as string;
-  eq((await call('POST', '/auth/signup', null, { name: 'X', phone: '9876543210', password: 'secret1' })).status, 409, 'duplicate phone');
+  eq((await signup('X', '9876543210', 'secret1')).status, 409, 'duplicate phone');
+  eq((await call('POST', '/auth/signup', null, { name: 'Z', phone: '9000000001', password: 'secret1' })).status, 200, 'signup needs no code');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'nope00' })).status, 401, 'bad password');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret1' })).status, 200, 'login');
 
@@ -50,10 +56,13 @@ try {
   });
   eq(ops.json.results.filter((r: any) => r.ok).length, 5, 'five ops apply');
   eq(ops.json.results[4].ok, false, 'split that does not add up is rejected');
+  const multi = await call('POST', '/ops', A, { ops: [{ type: 'expense.upsert', expense: { ...dinner, id: 'multi1', amount: 1000, payerId: aid, payers: [{ id: aid, amount: 600 }, { id: 'place1', amount: 400 }], shares: { [aid]: 500, place1: 500 }, items: [{ name: 'Pizza', amount: 1000, memberIds: [aid, 'place1'] }] } }] });
+  eq(multi.json.results[0].ok, true, 'two payers and an item save');
+  eq((await call('GET', '/sync', A)).json.expenses.find((e: any) => e.id === 'multi1').payers[0].amount, 600, 'payers come back');
 
   const s1 = await call('GET', '/sync', A);
   eq(s1.json.groups.length, 1, 'a sees group');
-  eq(s1.json.expenses.length, 1, 'a sees the group expense, and the personal one was never stored');
+  eq(s1.json.expenses.length, 2, 'a sees the group expenses, and the personal one was never stored');
   eq(Object.keys(s1.json.prefs).length, 0, 'budget and tags are not kept on the server');
   eq(s1.json.pro, false, 'free unless the server makes everyone pro');
   db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, aid);
@@ -79,7 +88,7 @@ try {
   eq((await call('POST', '/join', B, { code, claimId: 'place1' })).status, 200, 'join');
 
   const s2 = await call('GET', '/sync', B);
-  eq(s2.json.expenses.length, 1, 'b sees only the group expense');
+  eq(s2.json.expenses.length, 2, 'b sees the group expenses');
   eq(s2.json.expenses[0].shares[bid], 600, 'claimed share');
   eq(s2.json.groups[0].memberIds.includes(aid), true, 'a listed for b');
 
@@ -150,6 +159,82 @@ try {
     wrong = true;
   }
   eq(wrong, true, 'a sealed value does not open with another key');
+  const sent = await call('POST', '/auth/otp', null, { phone: '9876543210', purpose: 'reset' });
+  eq(sent.status, 200, 'reset code');
+  eq((await call('POST', '/auth/reset', null, { phone: '9876543210', otp: codes.get('9876543210'), password: 'secret9' })).status, 200, 'password reset');
+  eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret1' })).status, 401, 'old password stops working');
+  const again = await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret9' });
+  eq(again.status, 200, 'new password works');
+  const A2 = again.json.token as string;
+  const dumped = await call('GET', '/account/export', A2);
+  eq(dumped.status, 200, 'export');
+  eq(dumped.json.account.phone, '9876543210', 'export has the phone');
+  eq(JSON.stringify(dumped.json).includes('secret'), false, 'export has no password');
+  eq((await call('POST', '/account/delete', A2, { password: 'nope' })).status, 401, 'delete needs the password');
+  eq((await call('POST', '/account/delete', A2, { password: 'secret9' })).status, 200, 'delete account');
+  eq((await call('GET', '/sync', A2)).status, 401, 'deleted account cannot sync');
+  eq((db.prepare('select created_by from groups where id = ?').get('goa01') as { created_by: string }).created_by, bid, 'a shared group moves to the other account');
+  eq((db.prepare('select count(*) as n from groups where id = ?').get('priv04') as { n: number }).n, 0, 'a group with no other account is removed');
+  eq((db.prepare('select user_id from people where id = ?').get(aid) as { user_id: string | null }).user_id, null, 'the person is no longer tied to the deleted account');
+  eq((await call('POST', '/backup', B, { wrap: 'wrap', blob: 'sealed-blob' })).status, 402, 'backup is pro');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, bid);
+  eq((await call('POST', '/backup', B, { wrap: 'wrap', blob: 'sealed-blob' })).status, 200, 'backup stored');
+  eq((db.prepare('select blob from backups where user_id = ?').get(bid) as { blob: string }).blob.includes('Dinner'), false, 'the merchant is not in the backup blob');
+  eq((await call('GET', '/backup', B)).json.blob, 'sealed-blob', 'backup comes back');
+  const made = await call('POST', '/mcp/create', B, { confirm: true });
+  eq(made.status, 200, 'remote mcp');
+  const pub = made.json.publicId as string;
+  const tok = made.json.token as string;
+  const rpc = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 200, 'remote mcp answers');
+  eq((await call('POST', '/mcp/disable', B, {})).status, 200, 'remote mcp off');
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 403, 'off keeps the token but refuses');
+  eq((await call('POST', '/mcp/enable', B, {})).status, 200, 'remote mcp on');
+  const rotated = await call('POST', '/mcp/regenerate', B, {});
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 401, 'old token dies');
+  eq((await call('POST', `/m/${pub}`, rotated.json.token, rpc)).status, 200, 'new token works');
+  eq((await call('POST', '/mcp/snapshot', B, { expenses: [{ account: '4521' }] })).status, 400, 'snapshot rejects an account');
+  const third = await signup('Chitra', '9000000088', 'secret1');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, third.json.you.id);
+  const other = await call('POST', '/mcp/create', third.json.token, { confirm: true });
+  eq(other.json.publicId !== pub, true, 'each account has its own public id');
+  const free = await signup('Free', '9000000077', 'secret1');
+  eq((await call('POST', '/ai/ask', free.json.token, { consent: true, question: 'What did I spend?' })).status, 402, 'ask is pro');
+  eq((await call('POST', '/ai/ask', B, { consent: true, question: 'What did I spend?' })).status, 501, 'this server has no AI key');
+  eq((await call('GET', '/sync/wait?after=0', B)).json.changed, true, 'a group change ends the wait');
+  const page = await fetch(`${base}/view/${code}`);
+  const html = await page.text();
+  eq(page.status, 200, 'shared group page');
+  eq(html.includes('Goa'), true, 'the page names the group');
+  eq(html.includes('98765'), false, 'the page has no phone number');
+  eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
+  const sellingDb = openDb(':memory:');
+  const selling = createApp(sellingDb, {
+    cors: '*',
+    sendOtp: (phone, code) => { codes.set(phone, code); },
+    verifyPlay: async () => ({ expiry: Date.now() + 60_000 }),
+  });
+  await new Promise<void>((done) => selling.listen(0, '127.0.0.1', done));
+  const sellBase = `http://127.0.0.1:${(selling.address() as AddressInfo).port}`;
+  const sellCall = (method: string, path: string, token: string | null, body?: unknown) =>
+    fetch(sellBase + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }).then(async (res) => ({ status: res.status, json: (await res.json()) as any }));
+  const buyerSent = await sellCall('POST', '/auth/otp', null, { phone: '9000000099', purpose: 'signup' });
+  eq(buyerSent.status, 200, 'buyer code');
+  const buyer = await sellCall('POST', '/auth/signup', null, { name: 'Buyer', phone: '9000000099', password: 'secret1', code: codes.get('9000000099') });
+  const bought = await sellCall('POST', '/billing/play', buyer.json.token, { purchaseToken: 'tok', productId: 'kakei_pro_yearly' });
+  eq(bought.status, 200, 'play purchase');
+  eq((await sellCall('GET', '/sync', buyer.json.token)).json.pro, true, 'pro until moves forward');
+  selling.close();
+  const hosted = createApp(openDb(':memory:'), { cors: '*', everyonePro: false });
+  await new Promise<void>((done) => hosted.listen(0, '127.0.0.1', done));
+  const hostedBase = `http://127.0.0.1:${(hosted.address() as AddressInfo).port}`;
+  const noSms = await fetch(hostedBase + '/auth/otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '9000000002', purpose: 'signup' }) });
+  eq(noSms.status, 503, 'hosted server without a text gateway cannot send a code');
+  hosted.close();
   console.log('server check ok');
 } finally {
   server.close();
