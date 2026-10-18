@@ -7,6 +7,32 @@ export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+function expenseDebts(e: Expense): Debt[] {
+  if (!e.shares) return [];
+  const paid = new Map<string, number>();
+  const list = e.payers?.length ? e.payers : e.payerId ? [{ id: e.payerId, amount: e.amount }] : [];
+  for (const p of list) paid.set(p.id, round2((paid.get(p.id) || 0) + p.amount));
+  if (!paid.size) return [];
+  const net = new Map<string, number>();
+  const touch = (id: string, d: number) => net.set(id, round2((net.get(id) || 0) + d));
+  for (const [id, share] of Object.entries(e.shares)) touch(id, -share);
+  for (const [id, v] of paid) touch(id, v);
+  const cred = [...net.entries()].filter(([, v]) => v > 0.5).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -0.5).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const out: Debt[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < cred.length && j < deb.length) {
+    const amt = Math.min(cred[i].v, deb[j].v);
+    if (amt > 0.5) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    cred[i].v -= amt;
+    deb[j].v -= amt;
+    if (cred[i].v < 0.5) i += 1;
+    if (deb[j].v < 0.5) j += 1;
+  }
+  return out;
+}
+
 export function equalShares(amount: number, ids: string[]) {
   const shares: Record<string, number> = {};
   if (!ids.length) return shares;
@@ -28,10 +54,8 @@ export function pairDebts(expenses: Expense[], settlements: Settlement[], groupI
     map.set(k, round2((map.get(k) || 0) + amt));
   };
   for (const e of expenses) {
-    if (e.groupId !== groupId || !e.shares || !e.payerId) continue;
-    for (const [id, share] of Object.entries(e.shares)) {
-      if (id !== e.payerId) add(id, e.payerId, share);
-    }
+    if (e.groupId !== groupId || !e.shares) continue;
+    for (const d of expenseDebts(e)) add(d.fromId, d.toId, d.amount);
   }
   for (const s of settlements) {
     if (s.groupId !== groupId) continue;

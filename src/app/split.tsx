@@ -38,6 +38,9 @@ export default function Split() {
   const [pct, setPct] = useState<Record<string, string>>({});
   const [reflect, setReflect] = useState(editing ? editing.reflect : params.reflect !== '0');
   const [tag, setTag] = useState<string | null>(editing?.tag ?? (params.tag || null));
+  const [multiPaid, setMultiPaid] = useState(!!editing?.payers?.length);
+  const [paid, setPaid] = useState<Record<string, string>>(() => Object.fromEntries((editing?.payers ?? []).map((p) => [p.id, String(p.amount)])));
+  const [items, setItems] = useState<{ name: string; amount: string; memberIds: string[] }[]>(() => (editing?.items ?? []).map((item) => ({ name: item.name, amount: String(item.amount), memberIds: item.memberIds })));
 
   if (!group) {
     return (
@@ -63,7 +66,14 @@ export default function Split() {
   const sum = Object.values(shares).reduce((a, b) => a + b, 0);
   const pctSum = included.reduce((a, id) => a + pctOf(id), 0);
   const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < 0.5 : Math.abs(pctSum - 100) < 0.5);
-  const ok = amount > 0 && included.length > 0 && balanced;
+  const payers = multiPaid ? members.map((id) => ({ id, amount: Number(paid[id]) || 0 })).filter((p) => p.amount > 0) : undefined;
+  const itemRows = items
+    .filter((item) => item.name.trim() && Number(item.amount) > 0)
+    .map((item) => ({ name: item.name.trim(), amount: Number(item.amount), memberIds: item.memberIds.length ? item.memberIds : included }));
+  const paidOk = !payers || Math.abs(payers.reduce((a, p) => a + p.amount, 0) - amount) < 0.5;
+  const itemsOk = !itemRows.length || Math.abs(itemRows.reduce((a, item) => a + item.amount, 0) - amount) < 0.5;
+  const ok = amount > 0 && included.length > 0 && balanced && paidOk && itemsOk;
+  const lead = payers?.slice().sort((a, b) => b.amount - a.amount)[0]?.id ?? payer;
   const name = (id: string) => (id === store.you.id ? 'You' : store.people.find((p) => p.id === id)?.name ?? 'Someone');
   const status = !included.length
     ? 'Pick at least one person'
@@ -76,15 +86,16 @@ export default function Split() {
   const save = () => {
     if (!ok) return;
     buzz('done');
+    const extra = { payerId: lead, payers, items: itemRows.length ? itemRows : undefined, shares, reflect, tag, groupId: group.id, amount, merchant: desc.trim() || editing?.merchant || draft?.merchant || 'Group expense' };
     if (editing) {
-      store.updateExpense({ ...editing, merchant: desc.trim() || editing.merchant, amount, tag, groupId: group.id, payerId: payer, shares, reflect });
+      store.updateExpense({ ...editing, ...extra, merchant: extra.merchant });
       store.flash(moving ? `Added to ${group.name}` : 'Split updated');
     } else if (draft) {
-      store.confirmDraft(draft.id, { tag, groupId: group.id, reflect, shares, payerId: payer });
+      store.confirmDraft(draft.id, { tag, groupId: group.id, reflect, shares, payerId: lead, payers, items: itemRows.length ? itemRows : undefined });
       store.flash('Split saved');
     } else {
       store.addExpense({
-        merchant: desc.trim() || 'Group expense',
+        merchant: extra.merchant,
         amount,
         at: new Date().toISOString(),
         tag,
@@ -94,9 +105,11 @@ export default function Split() {
         recurring: null,
         recurId: null,
         groupId: group.id,
-        payerId: payer,
+        payerId: lead,
         shares,
         reflect,
+        payers,
+        items: itemRows.length ? itemRows : undefined,
       });
     }
     goBack();
@@ -133,6 +146,28 @@ export default function Split() {
           <Chip key={id} label={name(id)} on={payer === id} onPress={() => setPayer(id)} />
         ))}
       </View>
+      <Press onPress={() => setMultiPaid((v) => !v)} style={{ marginTop: 12 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.acc }}>{multiPaid ? 'One person paid' : 'More than one person paid'}</Text>
+      </Press>
+      {multiPaid ? (
+        <View style={{ marginTop: 8, gap: 8 }}>
+          {members.map((id) => (
+            <View key={id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Text style={{ flex: 1, fontFamily: font.body, color: c.fg }}>{name(id)}</Text>
+              <Input value={paid[id] ?? ''} onChangeText={(v) => setPaid((s) => ({ ...s, [id]: v.replace(/[^0-9.]/g, '') }))} mode="decimal" label={`${name(id)} paid`} placeholder="0" style={{ width: 90, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <Press onPress={() => setItems((s) => [...s, { name: '', amount: '', memberIds: [] }])} style={{ marginTop: 14 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.acc }}>Add an item</Text>
+      </Press>
+      {items.map((item, index) => (
+        <View key={index} style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <Input value={item.name} onChangeText={(v) => setItems((s) => s.map((row, i) => i === index ? { ...row, name: v } : row))} label="Item" placeholder="Item" caps="sentences" style={{ flex: 1, fontFamily: font.body, fontSize: 15, color: c.fg }} />
+          <Input value={item.amount} onChangeText={(v) => setItems((s) => s.map((row, i) => i === index ? { ...row, amount: v.replace(/[^0-9.]/g, '') } : row))} mode="decimal" label="Item amount" placeholder="0" style={{ width: 80, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+        </View>
+      ))}
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 20 }}>
         <Chip label="Equally" on={mode === 'equal'} onPress={() => setMode('equal')} />
         <Chip label="Exact" on={mode === 'exact'} onPress={() => setMode('exact')} />

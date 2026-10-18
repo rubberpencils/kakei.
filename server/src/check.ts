@@ -50,10 +50,13 @@ try {
   });
   eq(ops.json.results.filter((r: any) => r.ok).length, 5, 'five ops apply');
   eq(ops.json.results[4].ok, false, 'split that does not add up is rejected');
+  const multi = await call('POST', '/ops', A, { ops: [{ type: 'expense.upsert', expense: { ...dinner, id: 'multi1', amount: 1000, payerId: aid, payers: [{ id: aid, amount: 600 }, { id: 'place1', amount: 400 }], shares: { [aid]: 500, place1: 500 }, items: [{ name: 'Pizza', amount: 1000, memberIds: [aid, 'place1'] }] } }] });
+  eq(multi.json.results[0].ok, true, 'two payers and an item save');
+  eq((await call('GET', '/sync', A)).json.expenses.find((e: any) => e.id === 'multi1').payers[0].amount, 600, 'payers come back');
 
   const s1 = await call('GET', '/sync', A);
   eq(s1.json.groups.length, 1, 'a sees group');
-  eq(s1.json.expenses.length, 1, 'a sees the group expense, and the personal one was never stored');
+  eq(s1.json.expenses.length, 2, 'a sees the group expenses, and the personal one was never stored');
   eq(Object.keys(s1.json.prefs).length, 0, 'budget and tags are not kept on the server');
   eq(s1.json.pro, false, 'free unless the server makes everyone pro');
   db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, aid);
@@ -79,7 +82,7 @@ try {
   eq((await call('POST', '/join', B, { code, claimId: 'place1' })).status, 200, 'join');
 
   const s2 = await call('GET', '/sync', B);
-  eq(s2.json.expenses.length, 1, 'b sees only the group expense');
+  eq(s2.json.expenses.length, 2, 'b sees the group expenses');
   eq(s2.json.expenses[0].shares[bid], 600, 'claimed share');
   eq(s2.json.groups[0].memberIds.includes(aid), true, 'a listed for b');
 

@@ -320,6 +320,35 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
             sum += share;
           }
           if (!Object.keys(shares).length || Math.abs(sum - amount) > 1) fail(400, 'Split does not add up to the amount');
+          if (Array.isArray(e.payers) && e.payers.length) {
+            let paid = 0;
+            const payers: { id: string; amount: number }[] = [];
+            for (const p of e.payers) {
+              const row = obj(p, 'payer');
+              const pid = ident(row.id, 'payer');
+              if (!members.has(pid)) fail(400, 'Payer is not in the group');
+              const part = money(row.amount, 'Paid', true);
+              if (part > 0) payers.push({ id: pid, amount: part });
+              paid += part;
+            }
+            if (!payers.length || Math.abs(paid - amount) > 1) fail(400, 'Payments do not add up to the amount');
+            payerId = payers.slice().sort((a, b) => b.amount - a.amount)[0].id;
+            e.payers = payers;
+          }
+          if (Array.isArray(e.items) && e.items.length) {
+            let itemSum = 0;
+            const items: { name: string; amount: number; memberIds: string[] }[] = [];
+            for (const raw of e.items) {
+              const item = obj(raw, 'item');
+              const memberIds = Array.isArray(item.memberIds) ? item.memberIds.map((pid) => ident(pid, 'item member')) : [];
+              if (memberIds.some((pid) => !members.has(pid))) fail(400, 'Item includes someone outside the group');
+              const part = money(item.amount, 'Item');
+              items.push({ name: text(item.name, 40, 'Item'), amount: part, memberIds });
+              itemSum += part;
+            }
+            if (Math.abs(itemSum - amount) > 1) fail(400, 'Items do not add up to the amount');
+            e.items = items;
+          }
         }
         if (!RAILS.has(e.rail)) fail(400, 'rail is invalid');
         const data = {
@@ -336,6 +365,8 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
           groupId,
           payerId,
           shares,
+          payers: Array.isArray(e.payers) ? e.payers : null,
+          items: Array.isArray(e.items) ? e.items : null,
           // Which of your accounts paid is your business, not the group's.
           account: null,
           bank: null,

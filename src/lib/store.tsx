@@ -298,7 +298,7 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   updateExpense: (e: Expense) => void;
   removeExpense: (id: string) => void;
   removeSettlement: (id: string) => void;
-  confirmDraft: (id: string, opts: { tag: string | null; groupId?: string | null; reflect?: boolean; shares?: Record<string, number> | null; payerId?: string | null }) => void;
+  confirmDraft: (id: string, opts: { tag: string | null; groupId?: string | null; reflect?: boolean; shares?: Record<string, number> | null; payerId?: string | null; payers?: { id: string; amount: number }[]; items?: { name: string; amount: number; memberIds: string[] }[] }) => void;
   ignoreDraft: (id: string) => void;
   skipDraft: (id: string) => void;
   focusDraft: (id: string) => void;
@@ -553,6 +553,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           groupId: group?.id ?? null,
           payerId: group ? (opts.payerId ?? x.you.id) : null,
           shares: group ? (opts.shares ?? equalShares(d.amount, members)) : null,
+          payers: opts.payers,
+          items: opts.items,
           reflect: group ? opts.reflect !== false : true,
           bank: d.bank,
           account: d.account,
