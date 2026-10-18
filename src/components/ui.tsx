@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type PressableProps,
   type StyleProp,
@@ -418,7 +419,14 @@ export function Toast() {
   );
 }
 
-type Ask = { title: string; body?: string; confirm: string; destructive?: boolean; onConfirm: () => void };
+type Ask = {
+  title: string;
+  body?: string;
+  confirm: string;
+  destructive?: boolean;
+  input?: { placeholder: string; secure?: boolean };
+  onConfirm: (value?: string) => void;
+};
 let showAsk: ((a: Ask) => void) | null = null;
 
 export function ask(a: Ask) {
@@ -431,8 +439,10 @@ export function ConfirmHost() {
   const reduce = useReducedMotion();
   const [a, setA] = useState<Ask | null>(null);
   const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
   useEffect(() => {
     showAsk = (next) => {
+      setValue('');
       setA(next);
       setOpen(true);
     };
@@ -462,9 +472,20 @@ export function ConfirmHost() {
             <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.bar, marginBottom: 20 }} />
             <Text style={{ fontFamily: font.displaySm, fontSize: 20, color: c.fg }}>{a.title}</Text>
             {a.body ? <Text style={{ fontFamily: font.body, fontSize: 15, lineHeight: 22, color: c.mut, marginTop: 8 }}>{a.body}</Text> : null}
+            {a.input ? (
+              <TextInput
+                value={value}
+                onChangeText={setValue}
+                placeholder={a.input.placeholder}
+                placeholderTextColor={c.faint}
+                secureTextEntry={a.input.secure}
+                autoCapitalize="none"
+                style={{ marginTop: 16, borderWidth: 1, borderColor: c.line, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontFamily: font.body, fontSize: 16, color: c.fg }}
+              />
+            ) : null}
             <View style={{ marginTop: 24, gap: 4 }}>
               <Press
-                onPress={() => { buzz(a.destructive ? 'tap' : 'done'); close(a.onConfirm); }}
+                onPress={() => { buzz(a.destructive ? 'tap' : 'done'); const typed = value; close(() => a.onConfirm(a.input ? typed : undefined)); }}
                 style={[styles.btn, { backgroundColor: a.destructive ? c.neg : c.acc }]}
               >
                 <Text style={[styles.btnText, { color: a.destructive ? '#fff' : c.accFg, fontFamily: font.semi }]}>{a.confirm}</Text>

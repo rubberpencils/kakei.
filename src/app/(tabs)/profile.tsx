@@ -9,7 +9,7 @@ import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
 import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
 import { askNotify } from '@/lib/notify';
-import { shareCsv, sharePdf } from '@/lib/export';
+import { shareCsv, shareJson, sharePdf } from '@/lib/export';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -157,6 +157,39 @@ export default function Profile() {
           <Icon name="chevron-right" size={20} color={c.mut} />
         </Row>
       </Press>
+
+      {store.signedIn ? (
+        <>
+          <Label>Account</Label>
+          <Press onPress={() => store.downloadAccount().then((data) => shareJson('kakei-account.json', data)).catch(() => store.flash('Could not download your data'))}>
+            <Row icon="download-outline" title="Download my data" sub="Groups and shared expenses stored for this account" />
+          </Press>
+          <Press onPress={() => {
+            ask({
+              title: 'Delete this account?',
+              body: 'Enter the password. You will confirm once more.',
+              confirm: 'Continue',
+              destructive: true,
+              input: { placeholder: 'Password', secure: true },
+              onConfirm: (password) => {
+                if (!password) return;
+                ask({
+                  title: 'Delete this account?',
+                  body: 'Shared groups move to someone else in them. A group with no other account is removed. Expenses on this phone stay here.',
+                  confirm: 'Delete account',
+                  destructive: true,
+                  onConfirm: async () => {
+                    const err = await store.deleteAccount(password);
+                    if (err) store.flash(err);
+                  },
+                });
+              },
+            });
+          }} style={{ marginTop: 4 }}>
+            <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>Delete account</Text>
+          </Press>
+        </>
+      ) : null}
 
       <Press onPress={signOut} style={{ marginTop: 28 }}>
         <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>{store.signedIn ? 'Sign out' : 'Erase everything on this phone'}</Text>

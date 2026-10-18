@@ -32,10 +32,11 @@ function Shell() {
   const [splash, setSplash] = useState(true);
   const done = useCallback(() => setSplash(false), []);
   const [unlocked, setUnlocked] = useState(!lock);
-
-  useEffect(() => {
-    if (!lock) setUnlocked(true);
-  }, [lock]);
+  const [seenLock, setSeenLock] = useState(lock);
+  if (seenLock !== lock) {
+    setSeenLock(lock);
+    setUnlocked(!lock);
+  }
 
   const askUnlock = useCallback(async () => {
     const LocalAuthentication = await import('expo-local-authentication');
@@ -44,7 +45,9 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    if (lock && !unlocked && !splash) askUnlock();
+    if (!(lock && !unlocked && !splash)) return;
+    const t = setTimeout(() => { void askUnlock(); }, 0);
+    return () => clearTimeout(t);
   }, [lock, unlocked, splash, askUnlock]);
 
   return (

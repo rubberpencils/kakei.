@@ -200,7 +200,7 @@ export function createApp(db: DatabaseSync, opts: {
       return { ok: true };
     }
     run('delete from otps where phone = ? and purpose = ?', phone, purpose);
-    fail(503, 'This server cannot send a code');
+    fail(503, 'Phone verification is not configured');
   }
 
   function signup(body: Row) {
@@ -237,11 +237,46 @@ export function createApp(db: DatabaseSync, opts: {
     const phone = phoneOf(body.phone);
     const pass = typeof body.password === 'string' ? body.password : '';
     if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
-    takeCode(phone, 'reset', body.code);
+    takeCode(phone, 'reset', body.otp);
     const row = one('select id from users where phone = ?', phone);
     if (!row) fail(400, 'That code is wrong or expired');
     run('update users set pass = ? where id = ?', hashPass(pass), row.id);
     run('delete from sessions where user_id = ?', row.id);
+    return { ok: true };
+  }
+
+  function accountExport(user: User) {
+    const snap = sync(user);
+    const row = one('select created, pro_until from users where id = ?', user.id);
+    const mine = 'select group_id from members where person_id = ?';
+    return {
+      account: { id: user.id, name: user.name, phone: user.phone, created: row?.created ?? null, proUntil: row?.pro_until ?? null },
+      memberships: all(`select group_id, person_id from members where group_id in (${mine})`, user.id),
+      groups: snap.groups,
+      people: snap.people,
+      expenses: snap.expenses,
+      settlements: snap.settlements,
+    };
+  }
+
+  function deleteAccount(user: User, body: Row) {
+    const pass = typeof body.password === 'string' ? body.password : '';
+    const row = one('select pass from users where id = ?', user.id);
+    if (!row || !checkPass(pass, row.pass)) fail(401, 'Password is wrong');
+    tx(() => {
+      for (const g of all('select id from groups where created_by = ?', user.id)) {
+        const next = one(
+          `select p.user_id as id from members m join people p on p.id = m.person_id
+           where m.group_id = ? and p.user_id is not null and p.user_id != ? limit 1`,
+          g.id, user.id,
+        );
+        if (next) run('update groups set created_by = ? where id = ?', next.id, g.id);
+        else run('delete from groups where id = ?', g.id);
+      }
+      run('delete from expenses where owner_id = ? and group_id is null', user.id);
+      run('delete from hidden where user_id = ?', user.id);
+      run('delete from users where id = ?', user.id);
+    });
     return { ok: true };
   }
 
@@ -590,6 +625,8 @@ export function createApp(db: DatabaseSync, opts: {
       run('delete from sessions where token = ?', sha((req.headers.authorization ?? '').slice(7)));
       return { ok: true };
     }
+    if (method === 'GET' && path === '/account/export') return accountExport(user);
+    if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
     if (method === 'GET' && path === '/sync') return sync(user);
     if (method === 'POST' && path === '/ops') return ops(user, await readBody(req));
     if (method === 'POST' && path === '/join') return join(user, await readBody(req));

@@ -298,6 +298,8 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   connect: () => void;
   cancelConnect: () => void;
   signOut: () => void;
+  downloadAccount: () => Promise<unknown>;
+  deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => Promise<void>;
   setSmsOn: (on: boolean) => void;
   setName: (name: string) => void;
@@ -518,7 +520,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
       resetPassword: async (phone, code, password) => {
         try {
-          await call(cur.current.base, null, 'POST', '/auth/reset', { phone, code, password });
+          await call(cur.current.base, null, 'POST', '/auth/reset', { phone, otp: code, password });
           return null;
         } catch (err) {
           return err instanceof Error ? err.message : 'Could not reset the password';
@@ -532,6 +534,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       connect: () => setS((x) => (x.local ? { ...x, connecting: true } : x)),
       cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
+      downloadAccount: () => call(cur.current.base, cur.current.token, 'GET', '/account/export'),
+      deleteAccount: async (password) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/account/delete', { password });
+          signOutLocal();
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not delete the account';
+        }
+      },
       signOut: () => {
         const { base, token } = cur.current;
         if (token) {
@@ -877,8 +889,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return limit > 0 && !s.alerted.includes(key) && tagSpend(s.expenses, s.you.id, tag, from, to) >= limit;
     });
     if (!fresh.length) return;
-    setS((x) => ({ ...x, alerted: [...x.alerted, ...fresh.map(([tag]) => `${month}:${tag}`)].slice(-200) }));
-    for (const [tag, limit] of fresh) showNote(`#${tag} budget`, `Spending on ${tag} crossed ₹${limit} this month.`, tag.length);
+    const t = setTimeout(() => {
+      setS((x) => ({ ...x, alerted: [...x.alerted, ...fresh.map(([tag]) => `${month}:${tag}`)].slice(-200) }));
+      for (const [tag, limit] of fresh) showNote(`#${tag} budget`, `Spending on ${tag} crossed ₹${limit} this month.`, tag.length);
+    }, 0);
+    return () => clearTimeout(t);
   }, [ready, s.expenses, s.tagBudgets, s.alerted, s.you.id]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

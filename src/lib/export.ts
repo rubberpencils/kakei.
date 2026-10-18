@@ -10,6 +10,14 @@ function rows(expenses: Expense[]) {
   return expenses.filter((e) => !e.sample);
 }
 
+export async function shareJson(name: string, data: unknown) {
+  const file = new File(Paths.cache, name);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(JSON.stringify(data, null, 2));
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Kakei data' });
+}
+
 export async function shareCsv(expenses: Expense[]) {
   const lines = ['date,merchant,amount,tag,rail,income,transfer'];
   for (const e of rows(expenses)) {

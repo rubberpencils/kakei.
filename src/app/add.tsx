@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,16 +25,17 @@ export default function Add() {
   const [note, setNote] = useState('');
   const [tag, setTag] = useState<string | null>(null);
   const [rail, setRail] = useState<Rail>(params.rail === 'cash' ? 'cash' : 'upi');
+  const [seenRail, setSeenRail] = useState(params.rail);
+  if (seenRail !== params.rail) {
+    setSeenRail(params.rail);
+    if (params.rail === 'cash') setRail('cash');
+  }
   const [rec, setRec] = useState(false);
   const [freq, setFreq] = useState<'weekly' | 'monthly'>('monthly');
   const [daysAgo, setDaysAgo] = useState(0);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [payer, setPayer] = useState(store.you.id);
   const insets = useSafeAreaInsets();
-
-  useEffect(() => {
-    if (params.rail === 'cash') setRail('cash');
-  }, [params.rail]);
 
   // Real groups only. A quick split is made from one bill, not added to.
   const groups = store.groups.filter((g) => g.kind !== 'split');
