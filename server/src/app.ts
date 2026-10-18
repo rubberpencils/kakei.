@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
 import { answerMcp, privateKey, type McpData } from './mcp-host.ts';
+import { groupPage } from './page.ts';
 import { makeVault } from './vault.ts';
 
 type Row = Record<string, any>;
@@ -113,6 +114,7 @@ export function createApp(db: DatabaseSync, opts: {
 
   // ponytail: in-memory lockout, resets on restart and is per process. Move to the DB if you run several instances.
   const fails = new Map<string, { n: number; until: number }>();
+  const views = new Map<string, { n: number; until: number }>();
 
   const memberOf = (groupId: string, personId: string) =>
     !!one('select 1 from members where group_id = ? and person_id = ?', groupId, personId);
@@ -397,6 +399,41 @@ export function createApp(db: DatabaseSync, opts: {
       : { you: { id: row.user_id, name: owner?.name ?? 'You', initials: 'YO' }, people: [], groups: [], expenses: [], settlements: [], budget: 0 };
     const answered = answerMcp(JSON.stringify(await readBody(req, 1_000_000)), data);
     return { mcpStatus: answered.status, mcpBody: answered.body };
+  }
+
+  async function waitSync(user: User, after: number) {
+    const mine = 'select group_id from members where person_id = ?';
+    const deadline = Date.now() + 25_000;
+    const newer = () => {
+      const groups = one(`select max(updated) as n from groups where id in (${mine})`, user.id)?.n ?? 0;
+      const expenses = one(`select max(updated) as n from expenses where group_id in (${mine})`, user.id)?.n ?? 0;
+      const settlements = one(`select max(updated) as n from settlements where group_id in (${mine})`, user.id)?.n ?? 0;
+      return Math.max(Number(groups) || 0, Number(expenses) || 0, Number(settlements) || 0) > after;
+    };
+    while (!newer()) {
+      if (Date.now() >= deadline) return { changed: false };
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return { changed: true };
+  }
+
+  function viewGroup(req: IncomingMessage, code: string) {
+    const ip = req.socket.remoteAddress ?? 'local';
+    const lock = views.get(ip);
+    if (lock && lock.n >= 30 && lock.until > Date.now()) fail(429, 'Too many views');
+    views.set(ip, { n: lock && lock.until > Date.now() ? lock.n + 1 : 1, until: Date.now() + 60_000 });
+    const g = one('select id, name, note from groups where code = ?', code);
+    if (!g) fail(404, 'Group not found');
+    const people = all(
+      `select p.id, p.name from people p join members m on m.person_id = p.id where m.group_id = ?`,
+      g.id,
+    );
+    const names = new Map(people.map((p) => [p.id as string, p.name as string]));
+    const rows = all('select data from expenses where group_id = ?', g.id).map((r) => {
+      const e = JSON.parse(vault.open(r.data));
+      return { name: names.get(e.payerId) ?? 'Someone', merchant: String(e.merchant ?? ''), amount: Number(e.amount) || 0 };
+    });
+    return { html: groupPage({ name: g.name, note: g.note }, rows) };
   }
 
   async function ask(user: User, body: Row) {
@@ -767,9 +804,12 @@ export function createApp(db: DatabaseSync, opts: {
   }
 
   async function route(req: IncomingMessage) {
-    const path = new URL(req.url ?? '/', 'http://local').pathname.replace(/\/+$/, '') || '/';
+    const url = new URL(req.url ?? '/', 'http://local');
+    const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method ?? 'GET';
     if (method === 'GET' && path === '/health') return { ok: true };
+    const view = path.match(/^\/view\/([A-Za-z0-9]{4,12})$/);
+    if (method === 'GET' && view) return viewGroup(req, view[1]);
     const host = path.match(/^\/m\/([A-Za-z0-9_-]+)$/);
     if (method === 'POST' && host) return mcpCall(host[1], req);
     if (method === 'POST' && path === '/auth/otp') return sendCode(await readBody(req));
@@ -792,6 +832,7 @@ export function createApp(db: DatabaseSync, opts: {
     if (method === 'POST' && path === '/ai/ask') return ask(user, await readBody(req));
     if (method === 'GET' && path === '/account/export') return accountExport(user);
     if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
+    if (method === 'GET' && path === '/sync/wait') return waitSync(user, Number(url.searchParams.get('after') ?? 0));
     if (method === 'GET' && path === '/sync') return sync(user);
     if (method === 'POST' && path === '/ops') return ops(user, await readBody(req));
     if (method === 'POST' && path === '/join') return join(user, await readBody(req));
@@ -821,6 +862,10 @@ export function createApp(db: DatabaseSync, opts: {
         status = 500;
         out = { error: 'Server error' };
       }
+    }
+    if (out && typeof out === 'object' && 'html' in out) {
+      res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' }).end((out as { html: string }).html);
+      return;
     }
     const mcp = out && typeof out === 'object' && 'mcpBody' in out ? out as { mcpStatus: number; mcpBody: string } : null;
     if (mcp) {

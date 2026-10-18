@@ -204,6 +204,12 @@ try {
   const free = await signup('Free', '9000000077', 'secret1');
   eq((await call('POST', '/ai/ask', free.json.token, { consent: true, question: 'What did I spend?' })).status, 402, 'ask is pro');
   eq((await call('POST', '/ai/ask', B, { consent: true, question: 'What did I spend?' })).status, 501, 'this server has no AI key');
+  eq((await call('GET', '/sync/wait?after=0', B)).json.changed, true, 'a group change ends the wait');
+  const page = await fetch(`${base}/view/${code}`);
+  const html = await page.text();
+  eq(page.status, 200, 'shared group page');
+  eq(html.includes('Goa'), true, 'the page names the group');
+  eq(html.includes('98765'), false, 'the page has no phone number');
   eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
   const sellingDb = openDb(':memory:');
   const selling = createApp(sellingDb, {

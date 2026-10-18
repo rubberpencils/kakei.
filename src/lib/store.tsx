@@ -5,7 +5,7 @@ import { AppState } from 'react-native';
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { openBackup, sealBackup } from './backup';
 import { initials, localNoon, slugTag, uid } from './format';
-import { dueRecurring, equalShares, friendBalances, monthBounds, spendIn, tagSpend } from './ledger';
+import { dueRecurring, equalShares, friendBalances, monthBounds, personName, spendIn, tagSpend, whyYouPay } from './ledger';
 import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
 import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
@@ -60,6 +60,8 @@ type Local = {
   askOk: boolean;
   digest: boolean;
   sunday: string;
+  nudgeDay: string;
+  nudgeStamp: string;
 };
 
 const NOBODY: Person = { id: 'me', name: 'You', initials: 'YO' };
@@ -95,6 +97,8 @@ const FRESH: Local = {
   askOk: false,
   digest: false,
   sunday: '',
+  nudgeDay: '',
+  nudgeStamp: '',
 };
 
 type SmsIn = { sender: string; body: string; date: number; id?: string };
@@ -995,17 +999,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offSms = onBankSms(() => {
       scan();
     });
-    // ponytail: 20s polling, fine for small groups. Switch to server-sent events if group edits must feel instant.
-    const poll = setInterval(() => {
-      if (AppState.currentState === 'active') api.syncNow();
-    }, 20000);
+    let stopped = false;
+    const wait = async () => {
+      while (!stopped) {
+        const x = cur.current;
+        if (!x.token || AppState.currentState !== 'active') {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          continue;
+        }
+        try {
+          await call(x.base, x.token, 'GET', `/sync/wait?after=${x.syncedAt ?? 0}`, undefined, 30_000);
+          await api.syncNow();
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+    };
+    void wait();
+    const nudge = () => {
+      const x = cur.current;
+      const today = new Date().toISOString().slice(0, 10);
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -0.5).sort((a, b) => a.net - b.net);
+      const top = owed[0];
+      if (!top) return;
+      const stamp = `${top.id}:${Math.round(-top.net)}`;
+      if (x.nudgeDay === today || x.nudgeStamp === stamp) return;
+      const lines = whyYouPay(x.you.id, top.id, x.expenses, x.settlements).filter((line) => line.direction === 'owe').slice(0, 2).map((line) => line.label);
+      showNote(`You owe ${personName(x.people, x.you, top.id)} ₹${Math.round(-top.net)}`, lines.join(' · ') || 'Open balances', 9);
+      setS((cur) => ({ ...cur, nudgeDay: today, nudgeStamp: stamp }));
+    };
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       api.syncNow();
       scan();
+      nudge();
     });
     return () => {
-      clearInterval(poll);
+      stopped = true;
       sub.remove();
       offSms();
     };

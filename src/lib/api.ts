@@ -57,9 +57,9 @@ export function serverName(base: string) {
   return isOfficial(base) ? 'Official servers' : base.replace(/^https?:\/\//, '');
 }
 
-export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+export async function call<T>(base: string, token: string | null, method: 'GET' | 'POST', path: string, body?: unknown, timeout = 12000): Promise<T> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const timer = setTimeout(() => ctrl.abort(), timeout);
   let res: Response;
   try {
     res = await fetch(base + path, {
