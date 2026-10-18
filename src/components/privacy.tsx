@@ -6,10 +6,10 @@ import { Icon, Press, usePalette } from '@/components/ui';
 import { font } from '@/lib/theme';
 
 const POINTS = [
-  { icon: 'cellphone-lock', title: 'Your money stays on this phone', body: 'Spends, budget, tags and bank SMS stay here. They leave only if you turn on backup or remote MCP.' },
-  { icon: 'account-group-outline', title: 'Shared groups', body: 'Groups you share are sealed on the server. The server can read them so the people in the group stay in sync.' },
-  { icon: 'lock-outline', title: 'Encrypted and private', body: 'Shared data travels over HTTPS and is stored encrypted. Passwords are hashed. Messages from phone numbers are skipped and never opened.' },
-  { icon: 'wifi-off', title: 'Works without it', body: 'If the server is down or you are offline, Kakei keeps working and catches up later.' },
+  { icon: 'cellphone-lock', title: 'On this phone', body: 'Personal spends, budget, tags, bank SMS, account digits and bank names stay here.' },
+  { icon: 'account-group-outline', title: 'Shared groups', body: 'A group is sealed in transit and at rest. The server can read it so the people in it stay in sync.' },
+  { icon: 'cloud-lock-outline', title: 'Backup', body: 'An encrypted backup is a blob. The server stores it and cannot read it.' },
+  { icon: 'server-outline', title: 'Remote MCP', body: 'Only if you turn it on. The server keeps a readable copy without SMS text, account digits or bank names. Off stops access and keeps the token.' },
 ];
 
 /**

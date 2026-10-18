@@ -22,7 +22,9 @@ Bank SMS is the intake. The user classifies each message once, with one tag, and
 
 The phone is the ledger. Banks already text the transaction. Android can read the SMS inbox after permission. iOS cannot, so iOS intake is a Shortcuts automation that opens kakei. with the message. The user confirms every entry. Nothing is saved until they do.
 
-Other people have accounts and can join a group. There is no kakei. server and no central database. A group syncs by passing a signed-by-contents event payload (share or paste). Balances are computed from expenses and settlements, never stored as a balance table. Live always-on sync across phones is not in this version. The event payload is the transport until a relay exists.
+Other people have accounts and can join a group. The phone stays the ledger. A group is sealed and the server can read it so members stay in sync. Personal SMS, account digits and bank names stay on the phone, except inside a client-encrypted backup the server cannot read. Remote MCP is a separate readable snapshot, created only after a Pro user agrees, and it strips SMS text, account digits and bank names.
+
+Free covers everything on the phone plus group sync. Pro is backup, Ask, the AI Sunday digest and remote MCP. A self-hosted server makes every account Pro and does not sell anything. The hosted server sets `KAKEI_EVERYONE_PRO=false`, `GOOGLE_SA_JSON`, `SMS_OTP_URL` and `GEMINI_API_KEY`.
 
 Currency is INR. The monthly budget is one number the user sets. Spend under that number is savings.
 

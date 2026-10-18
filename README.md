@@ -48,19 +48,24 @@ A privacy focused expense ledger that turns bank SMS into spends, then splits th
 **Developer**
 - Turn the phone into a read-only [MCP](https://modelcontextprotocol.io) server so Cursor, Claude Desktop or any HTTP MCP client can ask about your spending. See [MCP server on your phone](#mcp-server-on-your-phone).
 
+## Free and Pro
+
+One Play build. Self-hosting sets every account to Pro and never opens the paywall, so BillingClient is not constructed. The hosted server sets `KAKEI_EVERYONE_PRO=false` and `GOOGLE_SA_JSON`. Without that JSON, `POST /billing/play` answers 501. A sideloaded APK cannot finish a Play purchase.
+
+Free, including with no account: bank SMS, review, budgets, splits, export, lock, the cash widget, phone verification, password reset, download and delete. Pro, because it costs hosting or a paid model: encrypted backup, Ask, the Sunday AI digest, and remote MCP.
+
 ## Where your data lives
 
 Kakei is local first. It works fully with no account and no server.
 
-| On the phone only | On the server, only if you share a group |
-| --- | --- |
-| Personal expenses, budget, tags, monthly history | Groups and the people in them |
-| Bank SMS text, bank names and account digits | Group expenses and settlements |
-| Anything in local mode | Your name and phone number, for friends to find you |
+| On the phone only | Sealed groups the server can read | Encrypted backup | Remote MCP snapshot |
+| --- | --- | --- | --- |
+| Personal expenses, budget, tags, history | Groups, members, group expenses, settlements | The whole ledger, sealed on the phone | Amounts, merchants, tags, dates, shares |
+| Bank SMS, account digits, bank names | Your name and phone, so friends can find you | The server cannot read this blob | No SMS text, account digits or bank names |
 
 - If the server is down or you are offline, Kakei keeps working. Group changes queue on the phone and send when it is back.
 - Signing out keeps your own spends, budget and tags. Only the shared groups leave the phone, and they come back when you log in.
-- Shared expenses and settlements are sealed on the server with AES-256-GCM. Account and bank digits are never sent. Passwords are hashed with scrypt, and traffic is HTTPS.
+- Shared expenses and settlements are sealed on the server with AES-256-GCM. Account digits and bank names are not in that sealed copy. They can sit inside the backup blob, which the server cannot read. Passwords are hashed with scrypt, and traffic is HTTPS.
 - Older versions uploaded personal spends. On the first sync after updating, the phone asks the server to forget them, but only once the phone holds its own copy.
 
 The onboarding account step and Profile explain the same thing in the app.
