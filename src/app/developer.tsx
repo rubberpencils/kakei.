@@ -189,6 +189,49 @@ export default function Developer() {
           </Text>
         </>
       ) : null}
+
+      {store.pro ? (
+        <>
+          <Text style={label(c.mut)}>Remote MCP</Text>
+          {store.dev.remoteId ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: font.semi, fontSize: 15, color: c.fg }}>Remote MCP</Text>
+                  <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 2 }}>
+                    {store.dev.remote ? 'On. A readable copy is on the server.' : 'Off. The token is kept.'}
+                  </Text>
+                </View>
+                <Toggle on={store.dev.remote} onPress={() => store.setRemote(!store.dev.remote).then((err) => { if (err) store.flash(err); })} />
+              </View>
+              <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, marginTop: 12 }}>{`${store.base}/m/${store.dev.remoteId}`}</Text>
+              {store.dev.remoteToken ? (
+                <Text selectable style={{ fontFamily: font.mono, fontSize: 12.5, color: c.fg, marginTop: 8 }}>{store.dev.remoteToken}</Text>
+              ) : (
+                <Text style={{ fontFamily: font.body, fontSize: 12.5, color: c.mut, marginTop: 8 }}>The token was shown on the phone that created it.</Text>
+              )}
+              <Press onPress={() => ask({
+                title: 'Replace the remote token?',
+                body: 'The old token stops working. The readable copy stays.',
+                confirm: 'Replace',
+                destructive: true,
+                onConfirm: () => store.regenerateRemote().then((err) => { if (err) store.flash(err); }),
+              })} style={{ marginTop: 14 }}>
+                <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.fg }}>Regenerate</Text>
+              </Press>
+            </>
+          ) : (
+            <Press onPress={() => ask({
+              title: 'Create a remote MCP?',
+              body: 'A readable copy is uploaded. SMS text and account numbers are not. Switching off stops access without deleting the token.',
+              confirm: 'Create remote MCP',
+              onConfirm: () => store.createRemote().then((err) => { if (err) store.flash(err); }),
+            })}>
+              <Text style={{ fontFamily: font.semi, fontSize: 15, color: c.fg }}>Create remote MCP</Text>
+            </Press>
+          )}
+        </>
+      ) : null}
     </ScrollView>
   );
 }

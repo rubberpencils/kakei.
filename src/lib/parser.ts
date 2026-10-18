@@ -1,5 +1,5 @@
-import type { Rail } from './types';
-import { localNoon } from './format';
+import type { Rail } from './types.ts';
+import { localNoon } from './format.ts';
 
 export type ParsedSms = {
   bank: string;

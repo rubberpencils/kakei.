@@ -1,5 +1,5 @@
-import type { Expense, Group, Person, Settlement } from './types';
-import { dayKey, localNoon } from './format';
+import type { Expense, Group, Person, Settlement } from './types.ts';
+import { dayKey, localNoon } from './format.ts';
 
 export type Debt = { fromId: string; toId: string; amount: number };
 

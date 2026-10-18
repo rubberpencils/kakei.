@@ -57,7 +57,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "server": "npm --prefix server start",
-    "check": "tsc -p tsconfig.check.json && node .tmp-check/selfcheck.js && npm --prefix server run check",
+    "check": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/lib/selfcheck.ts && npm --prefix server run check",
     "icons": "node scripts/make-icons.mjs"
   },
   "private": true,

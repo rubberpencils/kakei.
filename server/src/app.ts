@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 
 import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
+import { answerMcp, privateKey, type McpData } from './mcp-host.ts';
 import { makeVault } from './vault.ts';
 
 type Row = Record<string, any>;
@@ -254,6 +255,7 @@ export function createApp(db: DatabaseSync, opts: {
       account: { id: user.id, name: user.name, phone: user.phone, created: row?.created ?? null, proUntil: row?.pro_until ?? null },
       memberships: all(`select group_id, person_id from members where group_id in (${mine})`, user.id),
       backup: one('select wrap, blob, updated from backups where user_id = ?', user.id) ?? null,
+      mcp: one('select public_id, enabled, updated from mcp_hosts where user_id = ?', user.id) ?? null,
       groups: snap.groups,
       people: snap.people,
       expenses: snap.expenses,
@@ -318,6 +320,84 @@ export function createApp(db: DatabaseSync, opts: {
     return { wrap: row.wrap, blob: row.blob, updated: row.updated };
   }
 
+  function readSettings(uid: string): Row {
+    const row = one('select data from settings where user_id = ?', uid);
+    if (!row) return {};
+    try {
+      return JSON.parse(vault.open(row.data)) as Row;
+    } catch {
+      return {};
+    }
+  }
+
+  function writeSettings(uid: string, data: Row) {
+    run(
+      'insert into settings (user_id, data) values (?, ?) on conflict(user_id) do update set data = excluded.data',
+      uid, vault.seal(JSON.stringify(data)),
+    );
+  }
+
+  function mcpCreate(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    if (body.confirm !== true) fail(400, 'Confirm to create a remote MCP');
+    if (one('select 1 from mcp_hosts where user_id = ?', user.id)) fail(409, 'Remote MCP already exists');
+    const token = randomBytes(32).toString('base64url');
+    const publicId = randomBytes(9).toString('base64url');
+    run(
+      'insert into mcp_hosts (user_id, public_id, token_hash, enabled, snapshot, updated) values (?, ?, ?, 1, null, ?)',
+      user.id, publicId, sha(token), Date.now(),
+    );
+    const settings = readSettings(user.id);
+    settings.remoteMcp = { created: true, enabled: true, publicId };
+    writeSettings(user.id, settings);
+    return { token, publicId, url: `/m/${publicId}` };
+  }
+
+  function mcpSet(user: User, enabled: boolean) {
+    const row = one('select public_id from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    run('update mcp_hosts set enabled = ?, updated = ? where user_id = ?', enabled ? 1 : 0, Date.now(), user.id);
+    const settings = readSettings(user.id);
+    settings.remoteMcp = { created: true, enabled, publicId: row.public_id };
+    writeSettings(user.id, settings);
+    return { ok: true };
+  }
+
+  function mcpRegenerate(user: User) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select public_id from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    const token = randomBytes(32).toString('base64url');
+    run('update mcp_hosts set token_hash = ?, updated = ? where user_id = ?', sha(token), Date.now(), user.id);
+    return { token, publicId: row.public_id, url: `/m/${row.public_id}` };
+  }
+
+  function mcpSnapshot(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select enabled from mcp_hosts where user_id = ?', user.id);
+    if (!row) fail(404, 'No remote MCP');
+    if (!row.enabled) fail(403, 'Remote MCP is off');
+    if (privateKey(body)) fail(400, 'That snapshot includes a private field');
+    run('update mcp_hosts set snapshot = ?, updated = ? where user_id = ?', vault.seal(JSON.stringify(body)), Date.now(), user.id);
+    return { ok: true };
+  }
+
+  async function mcpCall(publicId: string, req: IncomingMessage) {
+    const row = one('select user_id, token_hash, enabled, snapshot from mcp_hosts where public_id = ?', publicId);
+    if (!row) fail(404, 'Not found');
+    const header = req.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!token || !sameHash(sha(token), row.token_hash)) fail(401, 'Token is wrong');
+    if (!row.enabled) fail(403, 'Remote MCP is off');
+    if (!isPro(row.user_id)) fail(402, 'Pro is required');
+    const owner = one('select name from users where id = ?', row.user_id);
+    const data: McpData = row.snapshot
+      ? JSON.parse(vault.open(row.snapshot))
+      : { you: { id: row.user_id, name: owner?.name ?? 'You', initials: 'YO' }, people: [], groups: [], expenses: [], settlements: [], budget: 0 };
+    const answered = answerMcp(JSON.stringify(await readBody(req, 1_000_000)), data);
+    return { mcpStatus: answered.status, mcpBody: answered.body };
+  }
+
   function auth(req: IncomingMessage): User {
     const header = req.headers.authorization ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
@@ -372,6 +452,7 @@ export function createApp(db: DatabaseSync, opts: {
       settlements,
       // Budget, tags and history stay on the phone. Kept as an empty object so older apps still read the reply.
       prefs: {},
+      settings: readSettings(uid),
     };
   }
 
@@ -654,6 +735,8 @@ export function createApp(db: DatabaseSync, opts: {
     const path = new URL(req.url ?? '/', 'http://local').pathname.replace(/\/+$/, '') || '/';
     const method = req.method ?? 'GET';
     if (method === 'GET' && path === '/health') return { ok: true };
+    const host = path.match(/^\/m\/([A-Za-z0-9_-]+)$/);
+    if (method === 'POST' && host) return mcpCall(host[1], req);
     if (method === 'POST' && path === '/auth/otp') return sendCode(await readBody(req));
     if (method === 'POST' && path === '/auth/signup') return signup(await readBody(req));
     if (method === 'POST' && path === '/auth/login') return login(await readBody(req));
@@ -666,6 +749,11 @@ export function createApp(db: DatabaseSync, opts: {
     if (method === 'POST' && path === '/billing/play') return playPurchase(user, await readBody(req));
     if (method === 'POST' && path === '/backup') return saveBackup(user, await readBody(req, 8_000_000));
     if (method === 'GET' && path === '/backup') return readBackup(user);
+    if (method === 'POST' && path === '/mcp/create') return mcpCreate(user, await readBody(req));
+    if (method === 'POST' && path === '/mcp/enable') return mcpSet(user, true);
+    if (method === 'POST' && path === '/mcp/disable') return mcpSet(user, false);
+    if (method === 'POST' && path === '/mcp/regenerate') return mcpRegenerate(user);
+    if (method === 'POST' && path === '/mcp/snapshot') return mcpSnapshot(user, await readBody(req, 8_000_000));
     if (method === 'GET' && path === '/account/export') return accountExport(user);
     if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
     if (method === 'GET' && path === '/sync') return sync(user);
@@ -697,6 +785,11 @@ export function createApp(db: DatabaseSync, opts: {
         status = 500;
         out = { error: 'Server error' };
       }
+    }
+    const mcp = out && typeof out === 'object' && 'mcpBody' in out ? out as { mcpStatus: number; mcpBody: string } : null;
+    if (mcp) {
+      res.writeHead(mcp.mcpStatus, { 'Content-Type': 'application/json' }).end(mcp.mcpBody);
+      return;
     }
     res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(out));
   });

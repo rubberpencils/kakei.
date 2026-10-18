@@ -184,6 +184,23 @@ try {
   eq((await call('POST', '/backup', B, { wrap: 'wrap', blob: 'sealed-blob' })).status, 200, 'backup stored');
   eq((db.prepare('select blob from backups where user_id = ?').get(bid) as { blob: string }).blob.includes('Dinner'), false, 'the merchant is not in the backup blob');
   eq((await call('GET', '/backup', B)).json.blob, 'sealed-blob', 'backup comes back');
+  const made = await call('POST', '/mcp/create', B, { confirm: true });
+  eq(made.status, 200, 'remote mcp');
+  const pub = made.json.publicId as string;
+  const tok = made.json.token as string;
+  const rpc = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 200, 'remote mcp answers');
+  eq((await call('POST', '/mcp/disable', B, {})).status, 200, 'remote mcp off');
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 403, 'off keeps the token but refuses');
+  eq((await call('POST', '/mcp/enable', B, {})).status, 200, 'remote mcp on');
+  const rotated = await call('POST', '/mcp/regenerate', B, {});
+  eq((await call('POST', `/m/${pub}`, tok, rpc)).status, 401, 'old token dies');
+  eq((await call('POST', `/m/${pub}`, rotated.json.token, rpc)).status, 200, 'new token works');
+  eq((await call('POST', '/mcp/snapshot', B, { expenses: [{ account: '4521' }] })).status, 400, 'snapshot rejects an account');
+  const third = await signup('Chitra', '9000000088', 'secret1');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, third.json.you.id);
+  const other = await call('POST', '/mcp/create', third.json.token, { confirm: true });
+  eq(other.json.publicId !== pub, true, 'each account has its own public id');
   eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
   const sellingDb = openDb(':memory:');
   const selling = createApp(sellingDb, {

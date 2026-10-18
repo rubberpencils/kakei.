@@ -1,9 +1,9 @@
-import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
-import { isPersonalSender } from './sender';
-import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser';
-import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger';
-import { handleMcp, type McpData } from './mcp';
-import type { Expense, Settlement } from './types';
+import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic.ts';
+import { isPersonalSender } from './sender.ts';
+import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser.ts';
+import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger.ts';
+import { handleMcp, type McpData } from './mcp.ts';
+import type { Expense, Settlement } from './types.ts';
 
 function eq(actual: unknown, expected: unknown, msg: string) {
   if (actual !== expected) throw new Error(`${msg}: got ${String(actual)}`);

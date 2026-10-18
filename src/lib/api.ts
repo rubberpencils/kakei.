@@ -20,6 +20,7 @@ export type Queued = Op & { qid: string };
 export type Remote = {
   you: { id: string; name: string; phone: string };
   pro: boolean;
+  settings?: { remoteMcp?: { created?: boolean; enabled?: boolean; publicId?: string } };
   people: { id: string; name: string; claimed: boolean }[];
   groups: (Omit<Group, 'memberIds'> & { memberIds: string[]; code: string; owner: boolean })[];
   expenses: Expense[];

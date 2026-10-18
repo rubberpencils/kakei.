@@ -65,6 +65,18 @@ export function openDb(path: string) {
       user_id text primary key references users(id) on delete cascade,
       data text not null
     );
+    create table if not exists mcp_hosts (
+      user_id text primary key references users(id) on delete cascade,
+      public_id text not null unique,
+      token_hash text not null,
+      enabled integer not null,
+      snapshot text,
+      updated integer not null
+    );
+    create table if not exists settings (
+      user_id text primary key references users(id) on delete cascade,
+      data text not null
+    );
     create table if not exists backups (
       user_id text primary key references users(id) on delete cascade,
       wrap text not null,

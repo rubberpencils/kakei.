@@ -15,7 +15,15 @@ import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from '.
 const KEY = 'kakie.v2';
 
 // Developer options. They live only on this phone and are never synced.
-export type DevSettings = { mcp: boolean; lan: boolean; port: number; token: string };
+export type DevSettings = {
+  mcp: boolean;
+  lan: boolean;
+  port: number;
+  token: string;
+  remote: boolean;
+  remoteId: string;
+  remoteToken: string;
+};
 
 type Local = {
   base: string;
@@ -73,7 +81,7 @@ const FRESH: Local = {
   rules: [],
   formats: [],
   recent: [],
-  dev: { mcp: false, lan: false, port: 8765, token: '' },
+  dev: { mcp: false, lan: false, port: 8765, token: '', remote: false, remoteId: '', remoteToken: '' },
   local: false,
   connecting: false,
   outbox: [],
@@ -234,6 +242,9 @@ function rebase(s: Local, r: Remote): Local {
     expenses: [...shared, ...s.expenses.filter((e) => !e.groupId)],
     settlements: r.settlements,
     pro: r.pro === true,
+    dev: r.settings?.remoteMcp?.publicId
+      ? { ...s.dev, remote: !!r.settings.remoteMcp.enabled, remoteId: r.settings.remoteMcp.publicId, remoteToken: s.dev.remoteId === r.settings.remoteMcp.publicId ? s.dev.remoteToken : '' }
+      : s.dev,
     syncedAt: Date.now(),
   };
   for (const op of s.outbox) next = applyOp(next, op);
@@ -311,6 +322,9 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   setSmsOn: (on: boolean) => void;
   setName: (name: string) => void;
   setDev: (patch: Partial<DevSettings>) => void;
+  createRemote: () => Promise<string | null>;
+  setRemote: (on: boolean) => Promise<string | null>;
+  regenerateRemote: () => Promise<string | null>;
   setBudget: (n: number) => void;
   setTagBudget: (tag: string, amount: number) => void;
   setLock: (on: boolean) => void;
@@ -373,6 +387,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .then((raw) => {
         if (!raw) return;
         const saved = { ...FRESH, ...(JSON.parse(raw) as Partial<Local>) };
+        saved.dev = { ...FRESH.dev, ...saved.dev };
         // An older build saved localhost as the server. Without an account there, move to the real server.
         if (!saved.token && isLocalHost(saved.base) && !isLocalHost(DEFAULT_API)) saved.base = DEFAULT_API;
         setS(saved);
@@ -609,6 +624,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (n && n !== cur.current.you.name) commit([{ type: 'me.set', name: n }]);
       },
       setDev: (patch) => setS((x) => ({ ...x, dev: { ...x.dev, ...patch } })),
+      createRemote: async () => {
+        try {
+          const res = await call<{ token: string; publicId: string }>(cur.current.base, cur.current.token, 'POST', '/mcp/create', { confirm: true });
+          setS((x) => ({ ...x, dev: { ...x.dev, remote: true, remoteId: res.publicId, remoteToken: res.token } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not create the remote MCP';
+        }
+      },
+      setRemote: async (on) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', on ? '/mcp/enable' : '/mcp/disable');
+          setS((x) => ({ ...x, dev: { ...x.dev, remote: on } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not update the remote MCP';
+        }
+      },
+      regenerateRemote: async () => {
+        try {
+          const res = await call<{ token: string; publicId: string }>(cur.current.base, cur.current.token, 'POST', '/mcp/regenerate');
+          setS((x) => ({ ...x, dev: { ...x.dev, remoteId: res.publicId, remoteToken: res.token } }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not replace the token';
+        }
+      },
       setLock: (lock) => setS((x) => ({ ...x, lock })),
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
       setTagBudget: (tag, amount) => {
@@ -927,6 +969,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, s.token, s.local, s.connecting]);
+
+  useEffect(() => {
+    if (!ready || !s.token || !s.pro || !s.dev.remote) return;
+    const t = setTimeout(() => {
+      const x = cur.current;
+      const body = {
+        you: x.you,
+        people: x.people.map((p) => ({ id: p.id, name: p.name, initials: p.initials })),
+        groups: x.groups.map((g) => ({ id: g.id, name: g.name, icon: g.icon, note: g.note, memberIds: g.memberIds })),
+        expenses: x.expenses.filter((e) => !e.sample).map((e) => ({
+          id: e.id, merchant: e.merchant, amount: e.amount, at: e.at, tag: e.tag, rail: e.rail,
+          income: !!e.income, transfer: !!e.transfer, groupId: e.groupId, payerId: e.payerId, shares: e.shares, payers: e.payers,
+        })),
+        settlements: x.settlements,
+        budget: x.budget,
+      };
+      call(x.base, x.token, 'POST', '/mcp/snapshot', body).catch(() => {});
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [ready, s.token, s.pro, s.dev.remote, s.expenses, s.groups, s.people, s.settlements, s.budget]);
 
   useEffect(() => {
     if (!ready) return;
