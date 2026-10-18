@@ -8,7 +8,8 @@ function eq(actual: unknown, expected: unknown, msg: string) {
 }
 
 const db = openDb(':memory:');
-const server = createApp(db, { cors: '*' });
+const codes = new Map<string, string>();
+const server = createApp(db, { cors: '*', sendOtp: (phone, code) => { codes.set(phone, code); } });
 await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -21,15 +22,23 @@ async function call(method: string, path: string, token: string | null, body?: u
   return { status: res.status, json: (await res.json()) as any };
 }
 
+async function signup(name: string, phone: string, password: string) {
+  const digits = phone.replace(/\D/g, '');
+  const sent = await call('POST', '/auth/otp', null, { phone, purpose: 'signup' });
+  if (sent.status !== 200) return sent;
+  return call('POST', '/auth/signup', null, { name, phone, password, code: codes.get(digits) });
+}
+
 try {
-  const a = await call('POST', '/auth/signup', null, { name: 'Ananya', phone: '98765 43210', password: 'secret1' });
+  const a = await signup('Ananya', '98765 43210', 'secret1');
   eq(a.status, 200, 'signup a');
-  const b = await call('POST', '/auth/signup', null, { name: 'Aarav', phone: '9123456780', password: 'secret2' });
+  const b = await signup('Aarav', '9123456780', 'secret2');
   const A = a.json.token as string;
   const B = b.json.token as string;
   const aid = a.json.you.id as string;
   const bid = b.json.you.id as string;
-  eq((await call('POST', '/auth/signup', null, { name: 'X', phone: '9876543210', password: 'secret1' })).status, 409, 'duplicate phone');
+  eq((await signup('X', '9876543210', 'secret1')).status, 409, 'duplicate phone');
+  eq((await call('POST', '/auth/signup', null, { name: 'Z', phone: '9000000001', password: 'secret1', code: '000000' })).status, 400, 'signup needs a real code');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'nope00' })).status, 401, 'bad password');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret1' })).status, 200, 'login');
 
@@ -153,6 +162,17 @@ try {
     wrong = true;
   }
   eq(wrong, true, 'a sealed value does not open with another key');
+  const sent = await call('POST', '/auth/otp', null, { phone: '9876543210', purpose: 'reset' });
+  eq(sent.status, 200, 'reset code');
+  eq((await call('POST', '/auth/reset', null, { phone: '9876543210', code: codes.get('9876543210'), password: 'secret9' })).status, 200, 'password reset');
+  eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret1' })).status, 401, 'old password stops working');
+  eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret9' })).status, 200, 'new password works');
+  const hosted = createApp(openDb(':memory:'), { cors: '*', everyonePro: false });
+  await new Promise<void>((done) => hosted.listen(0, '127.0.0.1', done));
+  const hostedBase = `http://127.0.0.1:${(hosted.address() as AddressInfo).port}`;
+  const noSms = await fetch(hostedBase + '/auth/otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '9000000002', purpose: 'signup' }) });
+  eq(noSms.status, 503, 'hosted server without a text gateway cannot send a code');
+  hosted.close();
   console.log('server check ok');
 } finally {
   server.close();

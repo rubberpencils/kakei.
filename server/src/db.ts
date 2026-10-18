@@ -65,6 +65,13 @@ export function openDb(path: string) {
       user_id text primary key references users(id) on delete cascade,
       data text not null
     );
+    create table if not exists otps (
+      phone text not null,
+      purpose text not null,
+      code_hash text not null,
+      expires integer not null,
+      primary key (phone, purpose)
+    );
   `);
   const cols = db.prepare('pragma table_info(groups)').all() as { name: string }[];
   if (!cols.some((col) => col.name === 'simplify')) db.exec('alter table groups add column simplify integer not null default 1');

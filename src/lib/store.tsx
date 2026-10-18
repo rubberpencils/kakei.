@@ -290,8 +290,10 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   hasSample: boolean;
   flash: (m: string) => void;
   setBase: (raw: string) => Promise<string | null>;
-  signUp: (name: string, phone: string, password: string) => Promise<string | null>;
+  requestCode: (phone: string, purpose: 'signup' | 'reset') => Promise<string | null>;
+  signUp: (name: string, phone: string, password: string, code: string) => Promise<string | null>;
   signIn: (phone: string, password: string) => Promise<string | null>;
+  resetPassword: (phone: string, code: string, password: string) => Promise<string | null>;
   startLocal: (name: string) => void;
   connect: () => void;
   cancelConnect: () => void;
@@ -504,8 +506,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cur.current = { ...cur.current, base };
         return null;
       },
-      signUp: (name, phone, password) => authed('/auth/signup', { name, phone, password }),
+      requestCode: async (phone, purpose) => {
+        try {
+          await call(cur.current.base, null, 'POST', '/auth/otp', { phone, purpose });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not send the code';
+        }
+      },
+      signUp: (name, phone, password, code) => authed('/auth/signup', { name, phone, password, code }),
       signIn: (phone, password) => authed('/auth/login', { phone, password }),
+      resetPassword: async (phone, code, password) => {
+        try {
+          await call(cur.current.base, null, 'POST', '/auth/reset', { phone, code, password });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not reset the password';
+        }
+      },
       startLocal: (name) =>
         setS((x) =>
           x.local

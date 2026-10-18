@@ -81,6 +81,7 @@ function Shell() {
           <Stack.Protected guard={!entered}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
           </Stack.Protected>
+          <Stack.Screen name="reset" />
         </Stack>
       ) : null}
       {/* The keyboard sits under the screens, so they shrink to make room for it. */}

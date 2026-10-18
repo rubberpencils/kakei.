@@ -17,6 +17,7 @@ const server = createApp(openDb(dbPath), {
   key: loadKey(dbPath),
   // On unless set to false. Self-hosters get everything; the hosted server sets KAKEI_EVERYONE_PRO=false.
   everyonePro: process.env.KAKEI_EVERYONE_PRO !== 'false',
+  otpUrl: process.env.SMS_OTP_URL,
 });
 
 server.listen(port, host, () => {

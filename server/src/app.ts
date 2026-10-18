@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 
@@ -93,7 +93,15 @@ async function readBody(req: IncomingMessage): Promise<Row> {
 // A stolen token stops working after this long. People sign in again.
 const SESSION_MS = 90 * 24 * 3600 * 1000;
 
-export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; everyonePro?: boolean }) {
+const OTP_MS = 10 * 60 * 1000;
+
+export function createApp(db: DatabaseSync, opts: {
+  cors: string;
+  key?: Buffer;
+  everyonePro?: boolean;
+  otpUrl?: string;
+  sendOtp?: (phone: string, code: string) => void | Promise<void>;
+}) {
   // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
   const vault = makeVault(opts.key ?? randomBytes(32));
   const one = (sql: string, ...args: SQLInputValue[]) => db.prepare(sql).get(...args) as Row | undefined;
@@ -151,11 +159,56 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
     }
   };
 
+  function sameHash(a: string, b: string) {
+    const x = Buffer.from(a);
+    const y = Buffer.from(b);
+    return x.length === y.length && timingSafeEqual(x, y);
+  }
+
+  function takeCode(phone: string, purpose: string, code: unknown) {
+    const given = typeof code === 'string' ? code.trim() : '';
+    const row = one('select code_hash, expires from otps where phone = ? and purpose = ?', phone, purpose);
+    if (!row || row.expires < Date.now() || !sameHash(sha(given), row.code_hash)) fail(400, 'That code is wrong or expired');
+    run('delete from otps where phone = ? and purpose = ?', phone, purpose);
+  }
+
+  async function sendCode(body: Row) {
+    const phone = phoneOf(body.phone);
+    const purpose = body.purpose === 'reset' ? 'reset' : body.purpose === 'signup' ? 'signup' : '';
+    if (!purpose) fail(400, 'purpose is invalid');
+    if (purpose === 'reset' && !one('select 1 from users where phone = ?', phone)) return { ok: true };
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    run(
+      'insert into otps (phone, purpose, code_hash, expires) values (?, ?, ?, ?) on conflict(phone, purpose) do update set code_hash = excluded.code_hash, expires = excluded.expires',
+      phone, purpose, sha(code), Date.now() + OTP_MS,
+    );
+    if (opts.sendOtp) {
+      await opts.sendOtp(phone, code);
+      return { ok: true };
+    }
+    if (opts.otpUrl) {
+      const res = await fetch(opts.otpUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code }),
+      });
+      if (!res.ok) fail(502, 'Could not send the code');
+      return { ok: true };
+    }
+    if (opts.everyonePro) {
+      console.log(`kakei. code for ${phone}: ${code}`);
+      return { ok: true };
+    }
+    run('delete from otps where phone = ? and purpose = ?', phone, purpose);
+    fail(503, 'This server cannot send a code');
+  }
+
   function signup(body: Row) {
     const name = text(body.name, 40, 'Name');
     const phone = phoneOf(body.phone);
     const pass = typeof body.password === 'string' ? body.password : '';
     if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
+    takeCode(phone, 'signup', body.code);
     if (one('select 1 from users where phone = ?', phone)) fail(409, 'That phone already has an account. Log in instead.');
     const user = { id: newId(), name, phone };
     return tx(() => {
@@ -178,6 +231,18 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
     }
     fails.delete(phone);
     return session({ id: row.id, name: row.name, phone: row.phone });
+  }
+
+  function resetPass(body: Row) {
+    const phone = phoneOf(body.phone);
+    const pass = typeof body.password === 'string' ? body.password : '';
+    if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
+    takeCode(phone, 'reset', body.code);
+    const row = one('select id from users where phone = ?', phone);
+    if (!row) fail(400, 'That code is wrong or expired');
+    run('update users set pass = ? where id = ?', hashPass(pass), row.id);
+    run('delete from sessions where user_id = ?', row.id);
+    return { ok: true };
   }
 
   function auth(req: IncomingMessage): User {
@@ -516,8 +581,10 @@ export function createApp(db: DatabaseSync, opts: { cors: string; key?: Buffer; 
     const path = new URL(req.url ?? '/', 'http://local').pathname.replace(/\/+$/, '') || '/';
     const method = req.method ?? 'GET';
     if (method === 'GET' && path === '/health') return { ok: true };
+    if (method === 'POST' && path === '/auth/otp') return sendCode(await readBody(req));
     if (method === 'POST' && path === '/auth/signup') return signup(await readBody(req));
     if (method === 'POST' && path === '/auth/login') return login(await readBody(req));
+    if (method === 'POST' && path === '/auth/reset') return resetPass(await readBody(req));
     const user = auth(req);
     if (method === 'POST' && path === '/auth/logout') {
       run('delete from sessions where token = ?', sha((req.headers.authorization ?? '').slice(7)));
