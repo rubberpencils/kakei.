@@ -6,7 +6,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { Input } from '@/components/input';
 import { Press, Section, Segmented, SettleRow, TxnRow, Word, useDark, usePalette } from '@/components/ui';
 import { dayKey, inr, monthName, pad } from '@/lib/format';
-import { cashFlow, monthBounds, personName } from '@/lib/ledger';
+import { cashFlow, detectSubs, monthBounds, personName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
 
@@ -145,6 +145,11 @@ export default function Insights() {
         <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 2 }}>
           {budget ? (over ? `₹${inr(flow.spent - budget)} over the ₹${inr(budget)} budget` : `${Math.round((unspent / budget) * 100)}% of ₹${inr(budget)} left`) : 'Set a monthly budget in Profile to track it here'}
         </Text>
+        {range === 'month' && months.length >= 2 ? (
+          <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 4 }}>
+            ₹{inr(Math.abs(flow.spent - months[months.length - 2].spent))} {flow.spent >= months[months.length - 2].spent ? 'more' : 'less'} than last month
+          </Text>
+        ) : null}
         <View style={{ marginTop: 16 }}>
           <Meter parts={[{ pct: (flow.spent / scale) * 100, color: over ? c.neg : c.fg }, { pct: (flow.owed / scale) * 100, color: c.pos }]} mark={over ? (budget / scale) * 100 : undefined} />
         </View>
@@ -244,7 +249,7 @@ export default function Insights() {
             <Text style={{ fontFamily: font.medium, fontSize: 13, color: c.mut }}>{live ? 'Safe to spend' : 'Saved'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
               <Text style={{ fontFamily: font.display, fontSize: 30, letterSpacing: -0.8, color: live && !safe ? c.neg : c.fg }}>₹{inr(live ? safe : unspent)}</Text>
-              <Text style={{ fontFamily: font.semi, fontSize: 14, color: c.mut }}>{live ? 'a day' : `${Math.round((unspent / budget) * 100)}% of budget`}</Text>
+              <Text style={{ fontFamily: font.semi, fontSize: 14, color: c.mut }}>{live ? 'a day' : `Savings rate ${Math.round((unspent / budget) * 100)}%`}</Text>
             </View>
             <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 2 }}>
               {!live ? (unspent >= goal ? 'You hit the 20% savings goal.' : `₹${inr(goal - unspent)} short of the 20% goal.`)
@@ -275,6 +280,21 @@ export default function Insights() {
         </View>
         {store.budget ? <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut, marginTop: 8 }}>Last six months against your budget line.</Text> : null}
       </Card>
+
+      {detectSubs(store.expenses).filter((sub) => !store.expenses.some((e) => e.merchant.toLowerCase() === sub.merchant.toLowerCase() && e.recurring === 'monthly')).length ? (
+        <>
+          <Section title="Looks like a subscription" top={28} />
+          <Card style={{ gap: 10 }}>
+            {detectSubs(store.expenses).filter((sub) => !store.expenses.some((e) => e.merchant.toLowerCase() === sub.merchant.toLowerCase() && e.recurring === 'monthly')).map((sub) => (
+              <Press key={sub.merchant} onPress={() => store.markMonthly(sub.merchant)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text style={{ flex: 1, fontFamily: font.medium, color: c.fg }}>{sub.merchant}</Text>
+                <Text style={{ fontFamily: font.mono, color: c.mut }}>₹{inr(sub.amount)}</Text>
+              </Press>
+            ))}
+            <Text style={{ fontFamily: font.body, fontSize: 12, color: c.mut }}>Tap one to mark it monthly.</Text>
+          </Card>
+        </>
+      ) : null}
 
       <Section title="Recurring and one-time" top={28} />
       <Card style={{ gap: 12 }}>

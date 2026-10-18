@@ -10,7 +10,7 @@ export type Op =
   | { type: 'expense.delete'; id: string }
   | { type: 'settlement.upsert'; settlement: Settlement }
   | { type: 'settlement.delete'; id: string }
-  | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[] } }
+  | { type: 'prefs.set'; prefs: { budget?: number; tags?: string[]; history?: MonthSnapshot[]; tagBudgets?: Record<string, number> } }
   | { type: 'me.set'; name?: string }
   // Asks the server to forget personal data that older versions of the app uploaded.
   | { type: 'personal.purge' };

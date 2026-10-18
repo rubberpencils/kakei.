@@ -4,10 +4,11 @@ import { AppState } from 'react-native';
 
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { initials, localNoon, slugTag, uid } from './format';
-import { dueRecurring, equalShares } from './ledger';
+import { dueRecurring, equalShares, tagSpend } from './ledger';
 import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
 import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
+import { showNote } from './notify';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
 
 const KEY = 'kakie.v2';
@@ -27,6 +28,8 @@ type Local = {
   tags: string[];
   budget: number;
   history: MonthSnapshot[];
+  tagBudgets: Record<string, number>;
+  alerted: string[];
   queue: Draft[];
   seen: string[];
   smsOn: boolean;
@@ -58,6 +61,8 @@ const FRESH: Local = {
   tags: TAGS,
   budget: 0,
   history: [],
+  tagBudgets: {},
+  alerted: [],
   queue: [],
   seen: [],
   smsOn: false,
@@ -128,6 +133,7 @@ function applyOp(s: Local, op: Op): Local {
         budget: op.prefs.budget ?? s.budget,
         tags: op.prefs.tags ?? s.tags,
         history: op.prefs.history ?? s.history,
+        tagBudgets: op.prefs.tagBudgets ?? s.tagBudgets,
       };
     case 'personal.purge':
       return s;
@@ -293,6 +299,8 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   setName: (name: string) => void;
   setDev: (patch: Partial<DevSettings>) => void;
   setBudget: (n: number) => void;
+  setTagBudget: (tag: string, amount: number) => void;
+  markMonthly: (merchant: string) => void;
   addTag: (raw: string) => string | null;
   addExpense: (e: NewExpense) => string;
   updateExpense: (e: Expense) => void;
@@ -385,6 +393,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         tags: x.tags,
         budget: x.budget,
         history: x.history,
+        tagBudgets: x.tagBudgets,
+        alerted: x.alerted,
         expenses: x.expenses.filter((e) => !e.groupId),
         you: x.you,
         local: true,
@@ -516,6 +526,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       setDev: (patch) => setS((x) => ({ ...x, dev: { ...x.dev, ...patch } })),
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
+      setTagBudget: (tag, amount) => {
+        const tagBudgets = { ...cur.current.tagBudgets };
+        if (amount > 0) tagBudgets[tag] = amount;
+        else delete tagBudgets[tag];
+        commit([{ type: 'prefs.set', prefs: { tagBudgets } }]);
+      },
+      markMonthly: (merchant) => {
+        const key = merchant.toLowerCase();
+        const latest = cur.current.expenses
+          .filter((e) => !e.groupId && !e.transfer && !e.income && e.merchant.toLowerCase() === key)
+          .sort((a, b) => b.at.localeCompare(a.at))[0];
+        if (!latest) return;
+        commit([{ type: 'expense.upsert', expense: { ...latest, recurring: 'monthly', recurId: latest.recurId ?? `sub-${key.replace(/[^a-z0-9]+/g, '-')}` } }]);
+      },
       addTag: (raw) => {
         const tag = slugTag(raw);
         if (!tag) return null;
@@ -818,6 +842,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, s.token, s.local, s.connecting]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const from = `${month}-01`;
+    const to = `${month}-31`;
+    const fresh = Object.entries(s.tagBudgets).filter(([tag, limit]) => {
+      const key = `${month}:${tag}`;
+      return limit > 0 && !s.alerted.includes(key) && tagSpend(s.expenses, s.you.id, tag, from, to) >= limit;
+    });
+    if (!fresh.length) return;
+    setS((x) => ({ ...x, alerted: [...x.alerted, ...fresh.map(([tag]) => `${month}:${tag}`)].slice(-200) }));
+    for (const [tag, limit] of fresh) showNote(`#${tag} budget`, `Spending on ${tag} crossed ₹${limit} this month.`, tag.length);
+  }, [ready, s.expenses, s.tagBudgets, s.alerted, s.you.id]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

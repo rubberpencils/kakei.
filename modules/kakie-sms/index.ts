@@ -10,6 +10,7 @@ type Events = { onMcpRequest: (e: McpRequest) => void; onSms: (e: { n: number })
 const native = requireNativeModule<{
   readInbox: (limit: number) => Promise<SmsRow[]>;
   drainSms: () => Promise<(SmsRow & { id: string })[]>;
+  showNote: (title: string, body: string, id: number) => Promise<void>;
   startMcp: (port: number, token: string, lan: boolean) => Promise<number>;
   stopMcp: () => Promise<void>;
   mcpReply: (id: string, status: number, body: string) => Promise<void>;
@@ -25,6 +26,10 @@ export function readInbox(limit: number) {
 
 export function drainSms() {
   return native.drainSms();
+}
+
+export function showNote(title: string, body: string, id: number) {
+  return native.showNote(title, body, id);
 }
 
 export function onSms(cb: () => void) {

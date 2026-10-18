@@ -3,6 +3,36 @@ import { dayKey, localNoon } from './format';
 
 export type Debt = { fromId: string; toId: string; amount: number };
 
+export function tagSpend(expenses: Expense[], youId: string, tag: string, from: string, to: string) {
+  return round2(expenses.reduce((sum, e) => {
+    if (e.tag !== tag || e.income || e.transfer || !inRange(e.at, from, to)) return sum;
+    return sum + pocket(e, youId);
+  }, 0));
+}
+
+export function detectSubs(expenses: Expense[]) {
+  const groups = new Map<string, Expense[]>();
+  for (const e of expenses) {
+    if (e.income || e.transfer || e.sample || e.groupId) continue;
+    const key = e.merchant.toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), e]);
+  }
+  const out: { merchant: string; amount: number }[] = [];
+  for (const list of groups.values()) {
+    const sorted = list.slice().sort((a, b) => a.at.localeCompare(b.at));
+    if (sorted.length < 3) continue;
+    let gaps = 0;
+    for (let i = 1; i < sorted.length; i += 1) {
+      const days = (Date.parse(sorted[i].at) - Date.parse(sorted[i - 1].at)) / 86_400_000;
+      const prev = sorted[i - 1].amount;
+      const next = sorted[i].amount;
+      if (days >= 25 && days <= 35 && Math.abs(prev - next) / Math.max(prev, next) <= 0.15) gaps += 1;
+    }
+    if (gaps >= 2) out.push({ merchant: sorted[sorted.length - 1].merchant, amount: sorted[sorted.length - 1].amount });
+  }
+  return out;
+}
+
 export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }

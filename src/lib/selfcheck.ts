@@ -1,7 +1,7 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
 import { isPersonalSender } from './sender';
 import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser';
-import { cardBills, cashFlow, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger';
+import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
 
@@ -62,6 +62,12 @@ const rem = remainingOwed([dinner], sets);
 eq(owedBack(dinner, 'ananya', rem), 2400, 'owed');
 eq(pocket(dinner, 'ananya'), 1200, 'only your share is spend');
 eq(pocket({ ...dinner, reflect: false }, 'ananya'), 0, 'hidden');
+const sub = detectSubs([
+  { ...dinner, id: 'n1', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 199, at: '2026-01-15T12:00:00' },
+  { ...dinner, id: 'n2', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 199, at: '2026-02-15T12:00:00' },
+  { ...dinner, id: 'n3', groupId: null, payerId: null, shares: null, merchant: 'Netflix', amount: 210, at: '2026-03-16T12:00:00' },
+]);
+eq(sub[0]?.merchant, 'Netflix', 'three monthly charges look like a subscription');
 
 const debts = pairDebts([dinner], sets, 'goa');
 eq(debts.find((d) => d.fromId === 'aarav'), undefined, 'aarav settled');

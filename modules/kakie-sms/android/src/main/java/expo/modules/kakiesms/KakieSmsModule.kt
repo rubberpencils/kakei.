@@ -165,6 +165,17 @@ class KakieSmsModule : Module() {
       SmsInbox.drain(context)
     }
 
+    AsyncFunction("showNote") { title: String, body: String, id: Int ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+      if (Build.VERSION.SDK_INT >= 26) {
+        mgr.createNotificationChannel(android.app.NotificationChannel("kakei.sms", "Bank messages", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+      }
+      val builder = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(context, "kakei.sms") else android.app.Notification.Builder(context)
+      mgr.notify(id, builder.setSmallIcon(android.R.drawable.stat_notify_more).setContentTitle(title).setContentText(body).setAutoCancel(true).build())
+      null
+    }
+
     OnDestroy {
       ping = null
       stopListener()

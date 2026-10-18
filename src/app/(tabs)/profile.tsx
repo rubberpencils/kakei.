@@ -99,6 +99,13 @@ export default function Profile() {
         />
       </View>
       <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut }}>One number for the month. Spend under it is savings.</Text>
+      {store.tags.length ? (
+        <View style={{ marginTop: 12, gap: 8 }}>
+          {store.tags.map((tag) => (
+            <TagBudget key={tag} tag={tag} value={store.tagBudgets[tag] ?? 0} onSave={(n) => store.setTagBudget(tag, n)} />
+          ))}
+        </View>
+      ) : null}
 
       <Label>Sync and sharing</Label>
       {store.signedIn ? (
@@ -143,6 +150,18 @@ export default function Profile() {
         <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.neg }}>{store.signedIn ? 'Sign out' : 'Erase everything on this phone'}</Text>
       </Press>
     </ScrollView>
+  );
+}
+
+function TagBudget({ tag, value, onSave }: { tag: string; value: number; onSave: (n: number) => void }) {
+  const c = usePalette();
+  const [text, setText] = useState(value ? String(value) : '');
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Text style={{ flex: 1, fontFamily: font.medium, color: c.fg }}>#{tag}</Text>
+      <Text style={{ fontFamily: font.body, color: c.mut }}>₹</Text>
+      <Input value={text} onChangeText={(v) => setText(v.replace(/[^0-9]/g, ''))} onBlur={() => onSave(Number(text) || 0)} mode="number" label={`${tag} budget`} placeholder="0" style={{ width: 80, textAlign: 'right', fontFamily: font.displaySm, fontSize: 16, color: c.fg }} />
+    </View>
   );
 }
 
