@@ -8,6 +8,7 @@ import { PrivacyNote } from '@/components/privacy';
 import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
 import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
+import { askNotify } from '@/lib/notify';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -27,6 +28,7 @@ export default function Profile() {
     if (result.error === 'build') return store.flash('Inbox reading needs the installed app. Paste messages in Review.');
     const n = store.ingest(result.rows);
     store.setSmsOn(true);
+    await askNotify();
     store.flash(n ? `${n} new bank messages` : 'No new bank messages');
     if (n) router.push('/review');
   };
@@ -66,7 +68,7 @@ export default function Profile() {
       </Press>
 
       <Label>SMS import</Label>
-      <Row icon="message-text-outline" title="Read bank SMS" sub={store.smsOn ? 'Checks the inbox each time you open Kakei.' : 'Off'}>
+      <Row icon="message-text-outline" title="Read bank SMS" sub={store.smsOn ? 'A bank message can be filed as soon as it arrives.' : 'Off'}>
         <Switch value={store.smsOn} onValueChange={(on) => { store.setSmsOn(on); if (on) scan(); }} trackColor={{ true: c.acc, false: c.bar }} />
       </Row>
       <Press onPress={scan}>

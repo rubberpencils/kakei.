@@ -2,8 +2,33 @@ import { PermissionsAndroid, Platform } from 'react-native';
 
 import { isPersonalSender } from './sender';
 
-export type InboxRow = { sender: string; body: string; date: number };
+export type InboxRow = { sender: string; body: string; date: number; id?: string };
 export { isPersonalSender };
+
+export async function drainDeviceSms(): Promise<InboxRow[]> {
+  if (Platform.OS !== 'android') return [];
+  try {
+    const mod = await import('../../modules/kakie-sms');
+    return (await mod.drainSms()).filter((row) => !isPersonalSender(row.sender));
+  } catch {
+    return [];
+  }
+}
+
+export function onBankSms(cb: () => void) {
+  let removed = false;
+  let sub: { remove: () => void } | null = null;
+  import('../../modules/kakie-sms')
+    .then((mod) => {
+      if (removed) return;
+      sub = mod.onSms(cb);
+    })
+    .catch(() => {});
+  return () => {
+    removed = true;
+    sub?.remove();
+  };
+}
 
 export async function readDeviceSms(limit = 80, quiet = false): Promise<{ rows: InboxRow[]; error: null | 'ios' | 'denied' | 'build' }> {
   if (Platform.OS !== 'android') return { rows: [], error: 'ios' };

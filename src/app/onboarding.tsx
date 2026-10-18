@@ -17,6 +17,7 @@ import { Back, Body, Button, buzz, Field, Ghost, Icon, Press, Word, Wordmark, us
 import { PrivacyNote } from '@/components/privacy';
 import { DEFAULT_API, isOfficial, serverName } from '@/lib/api';
 import { inr } from '@/lib/format';
+import { askNotify } from '@/lib/notify';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
@@ -51,6 +52,7 @@ export default function Onboarding() {
     else {
       const n = store.ingest(result.rows);
       store.setSmsOn(true);
+      await askNotify();
       store.flash(n ? `${n} bank messages ready to review` : 'No bank messages yet');
     }
     go(2);

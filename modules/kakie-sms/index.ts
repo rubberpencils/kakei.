@@ -5,10 +5,11 @@ export type McpRequest = { id: string; body: string };
 /** kind: tailscale = reachable from anywhere over Tailscale, lan = Wi-Fi or hotspot, cellular = carrier address (not reachable from outside). */
 export type LocalAddress = { ip: string; kind: 'tailscale' | 'lan' | 'cellular'; iface: string };
 
-type Events = { onMcpRequest: (e: McpRequest) => void };
+type Events = { onMcpRequest: (e: McpRequest) => void; onSms: (e: { n: number }) => void };
 
 const native = requireNativeModule<{
   readInbox: (limit: number) => Promise<SmsRow[]>;
+  drainSms: () => Promise<(SmsRow & { id: string })[]>;
   startMcp: (port: number, token: string, lan: boolean) => Promise<number>;
   stopMcp: () => Promise<void>;
   mcpReply: (id: string, status: number, body: string) => Promise<void>;
@@ -20,6 +21,14 @@ const native = requireNativeModule<{
 
 export function readInbox(limit: number) {
   return native.readInbox(limit);
+}
+
+export function drainSms() {
+  return native.drainSms();
+}
+
+export function onSms(cb: () => void) {
+  return native.addListener('onSms', () => cb());
 }
 
 /** Opens a bearer-token HTTP listener. lan=false is loopback only. Resolves with the bound port. */

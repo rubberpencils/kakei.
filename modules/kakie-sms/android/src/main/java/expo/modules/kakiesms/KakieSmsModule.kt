@@ -38,6 +38,9 @@ fun isPersonalSender(address: String): Boolean {
 private class McpReply(val status: Int, val body: String)
 
 class KakieSmsModule : Module() {
+  companion object {
+    @Volatile var ping: (() -> Unit)? = null
+  }
   private var mcpSocket: ServerSocket? = null
   private var mcpToken = ""
   // 4 workers and a short queue. Extra connections are dropped instead of piling up, so a flood cannot exhaust memory.
@@ -47,7 +50,11 @@ class KakieSmsModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("KakieSms")
 
-    Events("onMcpRequest")
+    Events("onMcpRequest", "onSms")
+
+    OnCreate {
+      ping = { sendEvent("onSms", mapOf("n" to 1)) }
+    }
 
     AsyncFunction("readInbox") { limit: Int ->
       val context = appContext.reactContext ?: throw CodedException("No react context")
@@ -153,7 +160,15 @@ class KakieSmsModule : Module() {
       null
     }
 
-    OnDestroy { stopListener() }
+    AsyncFunction("drainSms") {
+      val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
+      SmsInbox.drain(context)
+    }
+
+    OnDestroy {
+      ping = null
+      stopListener()
+    }
   }
 
   private fun startHostService() {

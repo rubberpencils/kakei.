@@ -7,7 +7,7 @@ import { initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares } from './ledger';
 import { parseSms } from './parser';
 import { sampleData, TAGS } from './seed';
-import { readDeviceSms } from './sms';
+import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
 
 const KEY = 'kakie.v2';
@@ -66,7 +66,7 @@ const FRESH: Local = {
   cleaned: false,
 };
 
-type SmsIn = { sender: string; body: string; date: number };
+type SmsIn = { sender: string; body: string; date: number; id?: string };
 type NewExpense = Omit<Expense, 'id' | 'sample'> & { sample?: boolean };
 export type SyncState = 'idle' | 'syncing' | 'offline';
 
@@ -223,11 +223,11 @@ function rebase(s: Local, r: Remote): Local {
   return due.length ? enqueue(next, due.map((expense) => ({ type: 'expense.upsert', expense }))) : next;
 }
 
-function draftFrom(sender: string, body: string, at: string, key: string): Draft | null {
+function draftFrom(sender: string, body: string, at: string, key: string, id?: string): Draft | null {
   const parsed = parseSms(sender, body);
   if (!parsed) return null;
   return {
-    id: uid(), key, sender, body,
+    id: id ?? uid(), key, sender, body,
     bank: parsed.bank,
     at: parsed.at ?? at,
     amount: parsed.amount,
@@ -248,7 +248,7 @@ function addDrafts(s: Local, rows: SmsIn[]) {
     if (seen.has(key)) continue;
     seen.add(key);
     const d = new Date(row.date);
-    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key);
+    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key, row.id);
     if (draft) fresh.push(draft);
   }
   return { next: { ...s, seen: [...seen].slice(-2000), queue: [...fresh, ...s.queue] }, added: fresh.length };
@@ -284,6 +284,7 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   confirmDraft: (id: string, opts: { tag: string | null; groupId?: string | null; reflect?: boolean; shares?: Record<string, number> | null; payerId?: string | null }) => void;
   ignoreDraft: (id: string) => void;
   skipDraft: (id: string) => void;
+  focusDraft: (id: string) => void;
   settle: (s: Omit<Settlement, 'id' | 'sample'>) => void;
   createGroup: (name: string, memberNames: string[], icon?: string) => string;
   groupFromExpense: (expenseId: string, name: string, memberNames: string[], icon?: string) => string | null;
@@ -547,6 +548,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const [item] = queue.splice(i, 1);
         return { ...x, queue: [...queue, item] };
       }),
+      focusDraft: (id) => setS((x) => {
+        const i = x.queue.findIndex((q) => q.id === id);
+        if (i <= 0) return x;
+        const queue = [...x.queue];
+        const [item] = queue.splice(i, 1);
+        return { ...x, queue: [item, ...queue] };
+      }),
       settle: (row) => {
         commit([{ type: 'settlement.upsert', settlement: { ...row, id: uid() } }]);
         flash('Settlement recorded');
@@ -717,11 +725,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!ready || !(s.token || (s.local && !s.connecting))) return;
     const scan = async () => {
       if (!cur.current.smsOn) return;
+      const live = await drainDeviceSms();
+      if (live.length) setS((x) => addDrafts(x, live).next);
       const res = await readDeviceSms(80, true);
       if (res.rows.length) setS((x) => addDrafts(x, res.rows).next);
     };
     api.syncNow();
     scan();
+    const offSms = onBankSms(() => {
+      scan();
+    });
     // ponytail: 20s polling, fine for small groups. Switch to server-sent events if group edits must feel instant.
     const poll = setInterval(() => {
       if (AppState.currentState === 'active') api.syncNow();
@@ -734,6 +747,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       clearInterval(poll);
       sub.remove();
+      offSms();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, s.token, s.local, s.connecting]);

@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, FadeInRight, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,9 @@ export default function Review() {
   const store = useStore();
   const insets = useSafeAreaInsets();
   const reduce = useReducedMotion();
+  const params = useLocalSearchParams<{ id?: string; file?: string }>();
+  const want = typeof params.id === 'string' ? params.id : undefined;
+  const file = typeof params.file === 'string' ? params.file : undefined;
   const cur = store.queue[0];
   const [tag, setTag] = useState<string | null>(cur?.tag ?? null);
   const [groupOn, setGroupOn] = useState(false);
@@ -28,8 +31,12 @@ export default function Review() {
   if (cur && cur.id !== seenId) {
     setSeenId(cur.id);
     setTag(cur.tag);
-    setGroupOn(false);
+    setGroupOn(want === cur.id && file === 'split');
   }
+
+  useEffect(() => {
+    if (want) store.focusDraft(want);
+  }, [want, store]);
 
   const confirm = () => {
     if (!cur) return;
