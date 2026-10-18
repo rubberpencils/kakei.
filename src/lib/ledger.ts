@@ -104,6 +104,65 @@ export function reroutes(pairs: Debt[], simple: Debt[]): Reroute[] {
   return out;
 }
 
+export type WhyLine = { kind: 'share' | 'settlement'; expenseId?: string; label: string; amount: number; direction: 'owe' | 'owed' };
+
+/** The bills and payments between two people, before simplification. Owe minus owed is the pairwise net. */
+export function whyYouPay(you: string, other: string, expenses: Expense[], settlements: Settlement[], groupId?: string): WhyLine[] {
+  const lines: WhyLine[] = [];
+  for (const e of expenses) {
+    if (!e.shares || !e.payerId) continue;
+    if (groupId && e.groupId !== groupId) continue;
+    if (!groupId && !e.groupId) continue;
+    const yours = e.shares[you] ?? 0;
+    const theirs = e.shares[other] ?? 0;
+    if (e.payerId === other && yours > 0) lines.push({ kind: 'share', expenseId: e.id, label: e.merchant, amount: yours, direction: 'owe' });
+    if (e.payerId === you && theirs > 0) lines.push({ kind: 'share', expenseId: e.id, label: e.merchant, amount: theirs, direction: 'owed' });
+  }
+  for (const s of settlements) {
+    if (groupId && s.groupId !== groupId) continue;
+    if (s.fromId === you && s.toId === other) lines.push({ kind: 'settlement', label: 'You paid', amount: s.amount, direction: 'owed' });
+    if (s.fromId === other && s.toId === you) lines.push({ kind: 'settlement', label: 'They paid you', amount: s.amount, direction: 'owe' });
+  }
+  return lines;
+}
+
+export type ExactStep = {
+  fromId: string;
+  toId: string;
+  amount: number;
+  because: { fromId: string; viaId: string; toId: string; amount: number }[];
+};
+
+/** Each simplified payment, and the pairwise debts it replaced. */
+export function exactSteps(pairs: Debt[], simple: Debt[]): ExactStep[] {
+  const left = pairs.map((d) => ({ ...d }));
+  const out: ExactStep[] = [];
+  for (const s of simple) {
+    const because: ExactStep['because'] = [];
+    let need = s.amount;
+    const direct = left.find((d) => d.fromId === s.fromId && d.toId === s.toId && d.amount > 0.5);
+    if (direct) {
+      const take = Math.min(direct.amount, need);
+      direct.amount = round2(direct.amount - take);
+      need = round2(need - take);
+    }
+    for (const hop of left) {
+      if (need <= 0.5) break;
+      if (hop.fromId !== s.fromId || hop.amount <= 0.5) continue;
+      const onward = left.find((d) => d.fromId === hop.toId && d.toId === s.toId && d.amount > 0.5);
+      if (!onward) continue;
+      const take = Math.min(hop.amount, onward.amount, need);
+      if (take <= 0.5) continue;
+      hop.amount = round2(hop.amount - take);
+      onward.amount = round2(onward.amount - take);
+      need = round2(need - take);
+      because.push({ fromId: s.fromId, viaId: hop.toId, toId: s.toId, amount: round2(take) });
+    }
+    out.push({ fromId: s.fromId, toId: s.toId, amount: s.amount, because });
+  }
+  return out;
+}
+
 export function groupDebts(expenses: Expense[], settlements: Settlement[], group: Pick<Group, 'id' | 'simplify'>) {
   const pairs = pairDebts(expenses, settlements, group.id);
   return group.simplify === false ? pairs : simplify(pairs);

@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ask, Avatar, Back, buzz, Icon, Press, Segmented, SettleRow, timeline, useDark, usePalette, Word } from '@/components/ui';
 import { inr } from '@/lib/format';
-import { groupDebts, groupTotals, memberNets, pairDebts, personName, reroutes, youNet, type Debt } from '@/lib/ledger';
+import { groupDebts, groupTotals, memberNets, pairDebts, personName, exactSteps, youNet, type Debt } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
 import type { Expense, Person, Settlement } from '@/lib/types';
@@ -38,7 +38,7 @@ export default function GroupScreen() {
   const pairs = pairDebts(store.expenses, store.settlements, group.id);
   const debts = groupDebts(store.expenses, store.settlements, group);
   const net = youNet(debts, you);
-  const routes = simplified ? reroutes(pairs, debts) : [];
+  const routes = simplified ? exactSteps(pairs, debts).flatMap((s) => s.because) : [];
   const mine = debts.filter((d) => d.fromId === you || d.toId === you);
   const nets = memberNets(pairs);
   const totals = groupTotals(store.expenses, group, you);

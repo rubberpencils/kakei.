@@ -1,7 +1,7 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
 import { isPersonalSender } from './sender';
 import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser';
-import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
+import { cardBills, cashFlow, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
 
@@ -77,6 +77,12 @@ eq(groupDebts(chain, [], { ...trip, simplify: false }).length, 2, 'pairwise when
 eq(friendBalances(chain, [], [trip], 'a').find((f) => f.id === 'c')?.net, 100, 'c pays a directly');
 eq(friendBalances(chain, [], [{ ...trip, simplify: false }], 'a').find((f) => f.id === 'b')?.net, 100, 'b owes a when not simplified');
 eq(memberNets(pairDebts(chain, [], 'trip')).b, 0, 'b nets to zero');
+const pairs40 = [{ fromId: 'a', toId: 'b', amount: 100 }, { fromId: 'b', toId: 'c', amount: 40 }];
+const hop = exactSteps(pairs40, simplify(pairs40)).find((s) => s.toId === 'c');
+eq(hop?.amount, 40, 'A pays C the 40');
+eq(hop?.because[0]?.viaId, 'b', 'the 40 that A pays C names B');
+const dinnerWhy = whyYouPay('ananya', 'aarav', [dinner], sets, 'goa');
+eq(dinnerWhy.some((l) => l.direction === 'owed' && l.amount === 1200), true, 'why lists the share a friend still owes');
 
 const pct = percentShares(1000, { a: 33.3, b: 33.3, c: 33.4 });
 eq(Object.values(pct).reduce((x, y) => x + y, 0), 1000, 'percent shares add up');
