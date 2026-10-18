@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState } from 'react-native';
 
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
+import { openBackup, sealBackup } from './backup';
 import { initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares, tagSpend } from './ledger';
 import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
@@ -302,6 +303,8 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   cancelConnect: () => void;
   signOut: () => void;
   confirmPlay: (purchaseToken: string, productId: string) => Promise<string | null>;
+  saveBackup: (password: string) => Promise<string | null>;
+  restoreBackup: (password: string) => Promise<string | null>;
   downloadAccount: () => Promise<unknown>;
   deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => Promise<void>;
@@ -538,6 +541,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       connect: () => setS((x) => (x.local ? { ...x, connecting: true } : x)),
       cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
+      saveBackup: async (password) => {
+        const x = cur.current;
+        try {
+          const packed = await sealBackup({
+            expenses: x.expenses, settlements: x.settlements, groups: x.groups, people: x.people,
+            budget: x.budget, tags: x.tags, rules: x.rules, history: x.history,
+          }, password);
+          await call(x.base, x.token, 'POST', '/backup', packed);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not back up';
+        }
+      },
+      restoreBackup: async (password) => {
+        const x = cur.current;
+        try {
+          const packed = await call<{ wrap: string; blob: string }>(x.base, x.token, 'GET', '/backup');
+          const data = await openBackup(packed.wrap, packed.blob, password);
+          setS((cur) => ({
+            ...cur,
+            expenses: [...data.expenses.filter((e) => !e.groupId), ...cur.expenses.filter((e) => e.groupId)],
+            budget: data.budget,
+            tags: data.tags,
+            rules: data.rules,
+            history: data.history,
+            groups: [...cur.groups, ...data.groups.filter((g) => !cur.groups.some((h) => h.id === g.id))],
+            people: [...cur.people, ...data.people.filter((p) => p.id !== cur.you.id && !cur.people.some((h) => h.id === p.id))],
+            settlements: [...cur.settlements, ...data.settlements.filter((s) => !cur.settlements.some((h) => h.id === s.id))],
+          }));
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not restore';
+        }
+      },
       confirmPlay: async (purchaseToken, productId) => {
         try {
           await call(cur.current.base, cur.current.token, 'POST', '/billing/play', { purchaseToken, productId });

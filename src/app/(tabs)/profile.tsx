@@ -120,6 +120,38 @@ export default function Profile() {
       </Row>
 
       <Label>Sync and sharing</Label>
+      {store.signedIn && store.pro ? (
+        <>
+          <Label>Backup</Label>
+          <Text style={{ fontFamily: font.body, fontSize: 13, lineHeight: 18, color: c.mut, marginBottom: 8 }}>Encrypted backup. The server stores it and cannot read it.</Text>
+          <Press onPress={() => ask({
+            title: 'Back up this phone?',
+            body: 'The password seals the backup. The server never sees it.',
+            confirm: 'Back up',
+            input: { placeholder: 'Password', secure: true },
+            onConfirm: async (password) => {
+              if (!password) return;
+              const err = await store.saveBackup(password);
+              store.flash(err ?? 'Backed up');
+            },
+          })}>
+            <Row icon="cloud-upload-outline" title="Back up now" sub="Expenses, groups, budget and rules" />
+          </Press>
+          <Press onPress={() => ask({
+            title: 'Restore a backup?',
+            body: 'Personal expenses on this phone are replaced. Groups already here stay.',
+            confirm: 'Restore',
+            input: { placeholder: 'Password', secure: true },
+            onConfirm: async (password) => {
+              if (!password) return;
+              const err = await store.restoreBackup(password);
+              store.flash(err ?? 'Restored');
+            },
+          })}>
+            <Row icon="cloud-download-outline" title="Restore" sub="Uses the password from the backup" />
+          </Press>
+        </>
+      ) : null}
       {store.signedIn && !store.pro ? (
         <Press onPress={() => router.push('/pro' as never)}>
           <Row icon="star-outline" title="Kakei Pro" sub="Backup, Ask, and a remote MCP" />

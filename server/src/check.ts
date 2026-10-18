@@ -179,6 +179,11 @@ try {
   eq((db.prepare('select created_by from groups where id = ?').get('goa01') as { created_by: string }).created_by, bid, 'a shared group moves to the other account');
   eq((db.prepare('select count(*) as n from groups where id = ?').get('priv04') as { n: number }).n, 0, 'a group with no other account is removed');
   eq((db.prepare('select user_id from people where id = ?').get(aid) as { user_id: string | null }).user_id, null, 'the person is no longer tied to the deleted account');
+  eq((await call('POST', '/backup', B, { wrap: 'wrap', blob: 'sealed-blob' })).status, 402, 'backup is pro');
+  db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, bid);
+  eq((await call('POST', '/backup', B, { wrap: 'wrap', blob: 'sealed-blob' })).status, 200, 'backup stored');
+  eq((db.prepare('select blob from backups where user_id = ?').get(bid) as { blob: string }).blob.includes('Dinner'), false, 'the merchant is not in the backup blob');
+  eq((await call('GET', '/backup', B)).json.blob, 'sealed-blob', 'backup comes back');
   eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
   const sellingDb = openDb(':memory:');
   const selling = createApp(sellingDb, {

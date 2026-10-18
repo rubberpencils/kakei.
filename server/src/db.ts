@@ -65,6 +65,12 @@ export function openDb(path: string) {
       user_id text primary key references users(id) on delete cascade,
       data text not null
     );
+    create table if not exists backups (
+      user_id text primary key references users(id) on delete cascade,
+      wrap text not null,
+      blob text not null,
+      updated integer not null
+    );
     create table if not exists otps (
       phone text not null,
       purpose text not null,

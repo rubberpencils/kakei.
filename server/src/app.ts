@@ -72,12 +72,12 @@ function checkPass(pw: string, stored: string) {
 const sha = (t: string) => createHash('sha256').update(t).digest('hex');
 const newId = () => randomBytes(9).toString('base64url');
 
-async function readBody(req: IncomingMessage): Promise<Row> {
+async function readBody(req: IncomingMessage, max = 1_000_000): Promise<Row> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > 1_000_000) fail(413, 'Body too large');
+    if (size > max) fail(413, 'Body too large');
     chunks.push(chunk);
   }
   if (!size) return {};
@@ -253,6 +253,7 @@ export function createApp(db: DatabaseSync, opts: {
     return {
       account: { id: user.id, name: user.name, phone: user.phone, created: row?.created ?? null, proUntil: row?.pro_until ?? null },
       memberships: all(`select group_id, person_id from members where group_id in (${mine})`, user.id),
+      backup: one('select wrap, blob, updated from backups where user_id = ?', user.id) ?? null,
       groups: snap.groups,
       people: snap.people,
       expenses: snap.expenses,
@@ -297,6 +298,24 @@ export function createApp(db: DatabaseSync, opts: {
     const until = Math.max(Number(current) || 0, expiry);
     run('update users set pro_until = ? where id = ?', until, user.id);
     return { proUntil: until };
+  }
+
+  function saveBackup(user: User, body: Row) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const wrap = text(body.wrap, 8_000_000, 'wrap');
+    const blob = text(body.blob, 8_000_000, 'blob');
+    run(
+      'insert into backups (user_id, wrap, blob, updated) values (?, ?, ?, ?) on conflict(user_id) do update set wrap = excluded.wrap, blob = excluded.blob, updated = excluded.updated',
+      user.id, wrap, blob, Date.now(),
+    );
+    return { ok: true };
+  }
+
+  function readBackup(user: User) {
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const row = one('select wrap, blob, updated from backups where user_id = ?', user.id);
+    if (!row) fail(404, 'No backup yet');
+    return { wrap: row.wrap, blob: row.blob, updated: row.updated };
   }
 
   function auth(req: IncomingMessage): User {
@@ -645,6 +664,8 @@ export function createApp(db: DatabaseSync, opts: {
       return { ok: true };
     }
     if (method === 'POST' && path === '/billing/play') return playPurchase(user, await readBody(req));
+    if (method === 'POST' && path === '/backup') return saveBackup(user, await readBody(req, 8_000_000));
+    if (method === 'GET' && path === '/backup') return readBackup(user);
     if (method === 'GET' && path === '/account/export') return accountExport(user);
     if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
     if (method === 'GET' && path === '/sync') return sync(user);
