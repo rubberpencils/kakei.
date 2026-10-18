@@ -19,6 +19,7 @@ export type Queued = Op & { qid: string };
 
 export type Remote = {
   you: { id: string; name: string; phone: string };
+  pro: boolean;
   people: { id: string; name: string; claimed: boolean }[];
   groups: (Omit<Group, 'memberIds'> & { memberIds: string[]; code: string; owner: boolean })[];
   expenses: Expense[];

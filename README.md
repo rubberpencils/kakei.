@@ -113,7 +113,7 @@ npm run server
 
 Listens on `0.0.0.0:4000`. The log line `phone URL:` is the address a phone on the same Wi-Fi should use. Reload on changes with `npm --prefix server run dev`.
 
-Settings are in `server/.env.example`. Set `KAKEI_DATA_KEY` so the data key never sits beside the database. Without it the server makes `data.key` next to the database, and you must keep a copy. Every account on a self-hosted server is pro. The hosted server sets `KAKEI_EVERYONE_PRO=false` and decides pro per account. The app has no paywall of its own.
+Settings are in `server/.env.example`. Set `KAKEI_DATA_KEY` so the data key never sits beside the database. Without it the server makes `data.key` next to the database, and you must keep a copy. Every account on a self-hosted server is pro, and the app never opens the Play paywall, so BillingClient is not constructed. The hosted server sets `KAKEI_EVERYONE_PRO=false` and `GOOGLE_SA_JSON`. Without that JSON, `POST /billing/play` answers 501. Contributors build the same source and point it at their server. A sideloaded APK cannot complete a Play purchase. The Play build uses an internal track.
 
 ### 3. Start the app
 

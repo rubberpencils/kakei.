@@ -120,6 +120,11 @@ export default function Profile() {
       </Row>
 
       <Label>Sync and sharing</Label>
+      {store.signedIn && !store.pro ? (
+        <Press onPress={() => router.push('/pro' as never)}>
+          <Row icon="star-outline" title="Kakei Pro" sub="Backup, Ask, and a remote MCP" />
+        </Press>
+      ) : null}
       {store.signedIn ? (
         <>
           <Row icon="server-network" title={serverName(store.base)} sub={syncLine}>

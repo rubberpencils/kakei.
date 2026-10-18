@@ -101,6 +101,7 @@ export function createApp(db: DatabaseSync, opts: {
   everyonePro?: boolean;
   otpUrl?: string;
   sendOtp?: (phone: string, code: string) => void | Promise<void>;
+  verifyPlay?: (purchaseToken: string, productId: string) => Promise<{ expiry: number }>;
 }) {
   // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
   const vault = makeVault(opts.key ?? randomBytes(32));
@@ -278,6 +279,24 @@ export function createApp(db: DatabaseSync, opts: {
       run('delete from users where id = ?', user.id);
     });
     return { ok: true };
+  }
+
+  async function playPurchase(user: User, body: Row) {
+    if (!opts.verifyPlay) fail(501, 'This server does not sell Pro');
+    const purchaseToken = text(body.purchaseToken, 4096, 'purchaseToken');
+    const productId = body.productId === 'kakei_pro_monthly' || body.productId === 'kakei_pro_yearly' ? body.productId : '';
+    if (!productId) fail(400, 'productId is invalid');
+    let expiry = 0;
+    try {
+      expiry = (await opts.verifyPlay(purchaseToken, productId)).expiry;
+    } catch (err) {
+      fail(400, err instanceof Error ? err.message : 'That purchase is not active');
+    }
+    if (expiry <= Date.now()) fail(400, 'That purchase is not active');
+    const current = one('select pro_until from users where id = ?', user.id)?.pro_until ?? 0;
+    const until = Math.max(Number(current) || 0, expiry);
+    run('update users set pro_until = ? where id = ?', until, user.id);
+    return { proUntil: until };
   }
 
   function auth(req: IncomingMessage): User {
@@ -625,6 +644,7 @@ export function createApp(db: DatabaseSync, opts: {
       run('delete from sessions where token = ?', sha((req.headers.authorization ?? '').slice(7)));
       return { ok: true };
     }
+    if (method === 'POST' && path === '/billing/play') return playPurchase(user, await readBody(req));
     if (method === 'GET' && path === '/account/export') return accountExport(user);
     if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
     if (method === 'GET' && path === '/sync') return sync(user);

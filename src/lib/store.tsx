@@ -46,6 +46,7 @@ type Local = {
   syncedAt: number | null;
   // Older versions uploaded personal spends. Set once the server has been asked to forget them.
   cleaned: boolean;
+  pro: boolean;
 };
 
 const NOBODY: Person = { id: 'me', name: 'You', initials: 'YO' };
@@ -77,6 +78,7 @@ const FRESH: Local = {
   outbox: [],
   syncedAt: null,
   cleaned: false,
+  pro: false,
 };
 
 type SmsIn = { sender: string; body: string; date: number; id?: string };
@@ -230,6 +232,7 @@ function rebase(s: Local, r: Remote): Local {
     groups: r.groups,
     expenses: [...shared, ...s.expenses.filter((e) => !e.groupId)],
     settlements: r.settlements,
+    pro: r.pro === true,
     syncedAt: Date.now(),
   };
   for (const op of s.outbox) next = applyOp(next, op);
@@ -298,6 +301,7 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   connect: () => void;
   cancelConnect: () => void;
   signOut: () => void;
+  confirmPlay: (purchaseToken: string, productId: string) => Promise<string | null>;
   downloadAccount: () => Promise<unknown>;
   deleteAccount: (password: string) => Promise<string | null>;
   syncNow: () => Promise<void>;
@@ -534,6 +538,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       connect: () => setS((x) => (x.local ? { ...x, connecting: true } : x)),
       cancelConnect: () => setS((x) => ({ ...x, connecting: false })),
+      confirmPlay: async (purchaseToken, productId) => {
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/billing/play', { purchaseToken, productId });
+          await syncNow();
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not verify the purchase';
+        }
+      },
       downloadAccount: () => call(cur.current.base, cur.current.token, 'GET', '/account/export'),
       deleteAccount: async (password) => {
         try {

@@ -179,6 +179,28 @@ try {
   eq((db.prepare('select created_by from groups where id = ?').get('goa01') as { created_by: string }).created_by, bid, 'a shared group moves to the other account');
   eq((db.prepare('select count(*) as n from groups where id = ?').get('priv04') as { n: number }).n, 0, 'a group with no other account is removed');
   eq((db.prepare('select user_id from people where id = ?').get(aid) as { user_id: string | null }).user_id, null, 'the person is no longer tied to the deleted account');
+  eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
+  const sellingDb = openDb(':memory:');
+  const selling = createApp(sellingDb, {
+    cors: '*',
+    sendOtp: (phone, code) => { codes.set(phone, code); },
+    verifyPlay: async () => ({ expiry: Date.now() + 60_000 }),
+  });
+  await new Promise<void>((done) => selling.listen(0, '127.0.0.1', done));
+  const sellBase = `http://127.0.0.1:${(selling.address() as AddressInfo).port}`;
+  const sellCall = (method: string, path: string, token: string | null, body?: unknown) =>
+    fetch(sellBase + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }).then(async (res) => ({ status: res.status, json: (await res.json()) as any }));
+  const buyerSent = await sellCall('POST', '/auth/otp', null, { phone: '9000000099', purpose: 'signup' });
+  eq(buyerSent.status, 200, 'buyer code');
+  const buyer = await sellCall('POST', '/auth/signup', null, { name: 'Buyer', phone: '9000000099', password: 'secret1', code: codes.get('9000000099') });
+  const bought = await sellCall('POST', '/billing/play', buyer.json.token, { purchaseToken: 'tok', productId: 'kakei_pro_yearly' });
+  eq(bought.status, 200, 'play purchase');
+  eq((await sellCall('GET', '/sync', buyer.json.token)).json.pro, true, 'pro until moves forward');
+  selling.close();
   const hosted = createApp(openDb(':memory:'), { cors: '*', everyonePro: false });
   await new Promise<void>((done) => hosted.listen(0, '127.0.0.1', done));
   const hostedBase = `http://127.0.0.1:${(hosted.address() as AddressInfo).port}`;
