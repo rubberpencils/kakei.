@@ -4,8 +4,8 @@ import { ScrollView, Share, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ask, Avatar, Back, buzz, Icon, Press, Segmented, SettleRow, timeline, useDark, usePalette, Word } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { ask, Avatar, Back, buzz, Icon, Press, Segmented, SettleRow, SwipeShift, timeline, useDark, usePalette, Word } from '@/components/ui';
+import { dust, inr } from '@/lib/format';
 import { groupDebts, groupTotals, memberNets, pairDebts, personName, exactSteps, youNet, type Debt } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font, tagColors } from '@/lib/theme';
@@ -80,6 +80,10 @@ export default function GroupScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+      <SwipeShift
+        onNext={() => setTab((t) => (t === 'activity' ? 'balances' : t === 'balances' ? 'totals' : 'activity'))}
+        onPrev={() => setTab((t) => (t === 'totals' ? 'balances' : t === 'balances' ? 'activity' : 'totals'))}
+      >
       <ScrollView
         stickyHeaderIndices={tab === 'activity' ? feed.sticky.map((i) => i + 1) : undefined}
         contentContainerStyle={{ paddingTop: 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 40 }}
@@ -216,8 +220,8 @@ export default function GroupScreen() {
                       <Avatar id={p.id} label={p.initials} you={p.id === you} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontFamily: font.medium, fontSize: 15, color: c.fg }}>{p.id === you ? 'You' : p.name}</Text>
-                        <Text style={{ fontFamily: font.body, fontSize: 12.5, color: v > 0.5 ? c.pos : v < -0.5 ? c.neg : c.mut, marginTop: 2 }}>
-                          {v > 0.5 ? `gets back ₹${inr(v)}` : v < -0.5 ? `owes ₹${inr(-v)}` : 'settled up'}
+                        <Text style={{ fontFamily: font.body, fontSize: 12.5, color: v > dust ? c.pos : v < -dust ? c.neg : c.mut, marginTop: 2 }}>
+                          {v > dust ? `gets back ₹${inr(v)}` : v < -dust ? `owes ₹${inr(-v)}` : 'settled up'}
                         </Text>
                       </View>
                       <Icon name="chevron-right" size={18} color={c.mut} />
@@ -255,6 +259,7 @@ export default function GroupScreen() {
           </Animated.View>
         )}
       </ScrollView>
+      </SwipeShift>
     </View>
   );
 }

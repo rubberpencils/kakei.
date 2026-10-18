@@ -10,7 +10,7 @@ import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
 import { askNotify } from '@/lib/notify';
 import { shareCsv, shareJson, sharePdf } from '@/lib/export';
-import { readDeviceSms } from '@/lib/sms';
+import { readDeviceSms, showTestSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
 
@@ -82,6 +82,11 @@ export default function Profile() {
       <Press onPress={scan}>
         <Row icon="refresh" title="Scan inbox now" />
       </Press>
+      {Platform.OS === 'android' ? (
+        <Press onPress={() => { store.setSmsOn(true); showTestSms().catch(() => store.flash('The installed app cannot post a test yet')); }}>
+          <Row icon="bell-outline" title="Send a test notification" sub="File, Other, and Not mine, without a real bank text" />
+        </Press>
+      ) : null}
       {accounts.length ? null : (
         <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, lineHeight: 18, marginTop: 4 }}>
           Accounts and cards appear here by themselves. Kakei reads the bank name and last four digits from each bank SMS you confirm.

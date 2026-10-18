@@ -1,5 +1,6 @@
 import { Platform, StyleSheet, TextInput, useColorScheme, type StyleProp, type TextStyle } from 'react-native';
 
+import { cleanAmount, cleanNumber, cleanPhone } from '@/lib/input-rules';
 import type { Caps, KeyMode } from '@/lib/keyboard';
 import { dark, light } from '@/lib/theme';
 
@@ -45,7 +46,10 @@ export function Input({
   return (
     <TextInput
       value={value}
-      onChangeText={(v) => onChangeText(centerFix ? v.replace(/\n/g, '') : v)}
+      onChangeText={(v) => {
+        const next = mode === 'decimal' ? cleanAmount(v) : mode === 'number' ? cleanNumber(v) : mode === 'phone' ? cleanPhone(v) : v;
+        onChangeText(centerFix ? next.replace(/\n/g, '') : next);
+      }}
       placeholder={placeholder}
       placeholderTextColor={placeholderTextColor ?? pal.mut}
       keyboardType={keys}

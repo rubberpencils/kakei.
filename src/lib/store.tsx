@@ -5,11 +5,11 @@ import { AppState } from 'react-native';
 
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { openBackup, sealBackup, type BackupPayload } from './backup';
-import { initials, localNoon, slugTag, uid } from './format';
+import { dust, initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares, friendBalances, monthBounds, personName, spendIn, tagSpend, whyYouPay } from './ledger';
 import { cleanMerchant, guessRail, parseWithRules, readMoney, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
-import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
+import { onBankSms, readDeviceSms, drainDeviceSms, drainFileActions, syncSmsBridge } from './sms';
 import { handleMcp } from './mcp';
 import { showNote } from './notify';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
@@ -350,6 +350,44 @@ function draftFrom(sender: string, body: string, at: string, key: string, rules:
     tag: parsed.tag,
     account: parsed.account,
   };
+}
+
+function applyFileActions(s: Local, actions: { id: string; kind: string; tag: string }[]): Local {
+  let next = s;
+  for (const a of actions) {
+    if (a.kind === 'drop') {
+      next = { ...next, queue: next.queue.filter((q) => q.id !== a.id) };
+      continue;
+    }
+    const d = next.queue.find((q) => q.id === a.id);
+    if (!d || d.amount <= 0) continue;
+    const tag = slugTag(a.tag) || d.tag;
+    const expense: Expense = {
+      id: uid(),
+      merchant: d.merchant || 'Payment',
+      amount: d.amount,
+      at: d.at,
+      tag,
+      rail: d.rail,
+      income: d.income,
+      transfer: d.transfer,
+      recurring: null,
+      recurId: null,
+      groupId: null,
+      payerId: null,
+      shares: null,
+      reflect: true,
+      bank: d.bank,
+      account: d.account,
+    };
+    const tags = tag && !next.tags.includes(tag) ? [...next.tags, tag] : next.tags;
+    const key = d.merchant.trim().toLowerCase();
+    const rules = tag && key
+      ? [...next.rules.filter((r) => r.key !== key), { key, tag }]
+      : next.rules;
+    next = enqueue({ ...next, tags, rules, queue: next.queue.filter((q) => q.id !== a.id) }, [{ type: 'expense.upsert', expense }]);
+  }
+  return next;
 }
 
 function addDrafts(s: Local, rows: SmsIn[]) {
@@ -1128,13 +1166,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [ready, s.token, s.outbox, api]);
 
   useEffect(() => {
+    if (!ready) return;
+    const tags: Record<string, string> = {};
+    for (const r of s.rules) if (r.tag) tags[r.key] = r.tag;
+    syncSmsBridge(s.smsOn, tags).catch(() => {});
+  }, [ready, s.smsOn, s.rules]);
+
+  useEffect(() => {
     if (!ready || !(s.token || (s.local && !s.connecting))) return;
     const scan = async () => {
       if (!cur.current.smsOn) return;
       const live = await drainDeviceSms();
-      if (live.length) setS((x) => addDrafts(x, live).next);
+      const actions = await drainFileActions();
       const res = await readDeviceSms(80, true);
-      if (res.rows.length) setS((x) => addDrafts(x, res.rows).next);
+      if (!live.length && !actions.length && !res.rows.length) return;
+      setS((x) => {
+        let next = live.length ? addDrafts(x, live).next : x;
+        if (res.rows.length) next = addDrafts(next, res.rows).next;
+        return actions.length ? applyFileActions(next, actions) : next;
+      });
     };
     api.syncNow();
     scan();
@@ -1161,7 +1211,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const nudge = () => {
       const x = cur.current;
       const today = new Date().toISOString().slice(0, 10);
-      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -0.5).sort((a, b) => a.net - b.net);
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -dust).sort((a, b) => a.net - b.net);
       const top = owed[0];
       if (!top) return;
       const stamp = `${top.id}:${Math.round(-top.net)}`;
@@ -1214,7 +1264,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const x = cur.current;
       const bounds = monthBounds(now.getFullYear(), now.getMonth() + 1);
       const spent = spendIn(x.expenses, x.settlements, x.you.id, bounds.from, bounds.to);
-      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -0.5).sort((a, b) => a.net - b.net)[0];
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -dust).sort((a, b) => a.net - b.net)[0];
       const left = Math.round((x.budget || 0) - spent.total);
       showNote('This Sunday', `Spent ₹${Math.round(spent.total)}. Left ₹${left}.${owed ? ` You owe ₹${Math.round(-owed.net)}.` : ''}`, 7);
       setS((cur) => ({ ...cur, sunday: day }));

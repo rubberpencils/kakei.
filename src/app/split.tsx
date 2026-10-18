@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Input } from '@/components/input';
 import { Back, Button, buzz, goBack, Icon, Press, TagPicker, usePalette, Word } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { dust, inr } from '@/lib/format';
 import { equalShares, percentShares, round2 } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -65,13 +65,13 @@ export default function Split() {
       : Object.fromEntries(included.map((id) => [id, Number(exact[id]) || 0]));
   const sum = Object.values(shares).reduce((a, b) => a + b, 0);
   const pctSum = included.reduce((a, id) => a + pctOf(id), 0);
-  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < 0.5 : Math.abs(pctSum - 100) < 0.5);
+  const balanced = mode === 'equal' || (mode === 'exact' ? Math.abs(sum - amount) < dust : Math.abs(pctSum - 100) < 0.5);
   const payers = multiPaid ? members.map((id) => ({ id, amount: Number(paid[id]) || 0 })).filter((p) => p.amount > 0) : undefined;
   const itemRows = items
     .filter((item) => item.name.trim() && Number(item.amount) > 0)
     .map((item) => ({ name: item.name.trim(), amount: Number(item.amount), memberIds: item.memberIds.length ? item.memberIds : included }));
-  const paidOk = !payers || Math.abs(payers.reduce((a, p) => a + p.amount, 0) - amount) < 0.5;
-  const itemsOk = !itemRows.length || Math.abs(itemRows.reduce((a, item) => a + item.amount, 0) - amount) < 0.5;
+  const paidOk = !payers || Math.abs(payers.reduce((a, p) => a + p.amount, 0) - amount) < dust;
+  const itemsOk = !itemRows.length || Math.abs(itemRows.reduce((a, item) => a + item.amount, 0) - amount) < dust;
   const ok = amount > 0 && included.length > 0 && balanced && paidOk && itemsOk;
   const lead = payers?.slice().sort((a, b) => b.amount - a.amount)[0]?.id ?? payer;
   const name = (id: string) => (id === store.you.id ? 'You' : store.people.find((p) => p.id === id)?.name ?? 'Someone');

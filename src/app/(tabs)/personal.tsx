@@ -5,7 +5,7 @@ import Animated, { FadeIn, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buzz, Icon, Press, TxnRow, Word, usePalette } from '@/components/ui';
-import { dayKey, inr, prettyDay } from '@/lib/format';
+import { dayKey, dust, inr, prettyDay } from '@/lib/format';
 import { cardBills, monthBounds, pocket, spendIn, youBalances } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -80,8 +80,8 @@ export default function Personal() {
           <Word size={28}>Personal</Word>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 20, marginBottom: 12 }}>
             <Stat label="This month" value={inr(month.total)} color={c.fg} />
-            <Stat label="Owed back" value={inr(owed)} color={owed > 0.5 ? c.pos : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} />
-            <Stat label="You owe" value={inr(owe)} color={owe > 0.5 ? c.neg : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owe' } })} />
+            <Stat label="Owed back" value={inr(owed)} color={owed > dust ? c.pos : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owed' } })} />
+            <Stat label="You owe" value={inr(owe)} color={owe > dust ? c.neg : c.fg} onPress={() => router.push({ pathname: '/balances', params: { side: 'owe' } })} />
           </View>
           {cards.length ? (
             <Press onPress={() => router.push('/card-bill')} style={{ marginBottom: 12, padding: 14, borderRadius: 16, backgroundColor: c.sub, flexDirection: 'row', alignItems: 'center', gap: 12 }}>

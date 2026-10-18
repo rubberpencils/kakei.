@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, Back, Icon, Press, Segmented, timeline, usePalette, Word } from '@/components/ui';
-import { inr } from '@/lib/format';
+import { Avatar, Back, Icon, Press, Segmented, SwipeShift, timeline, usePalette, Word } from '@/components/ui';
+import { dust, inr } from '@/lib/format';
 import { friendBalances, personName, whyYouPay } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -53,6 +53,10 @@ export default function PersonScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+      <SwipeShift
+        onNext={() => setFilter((f) => (f === 'all' ? 'shared' : 'all'))}
+        onPrev={() => setFilter((f) => (f === 'shared' ? 'all' : 'shared'))}
+      >
       <ScrollView stickyHeaderIndices={feed.sticky.map((i) => i + 1)} contentContainerStyle={{ paddingTop: 4, paddingHorizontal: 24, paddingBottom: insets.bottom + 40 }}>
         <View>
           <Back />
@@ -68,15 +72,15 @@ export default function PersonScreen() {
 
           {!isYou ? (
             <View style={{ marginTop: 22 }}>
-              <Text style={{ fontFamily: font.display, fontSize: 22, letterSpacing: -0.6, color: net > 0.5 ? c.pos : net < -0.5 ? c.neg : c.fg }}>
-                {net > 0.5 ? `${first} owes you ₹${inr(net)}` : net < -0.5 ? `You owe ${first} ₹${inr(-net)}` : 'All settled up'}
+              <Text style={{ fontFamily: font.display, fontSize: 22, letterSpacing: -0.6, color: net > dust ? c.pos : net < -dust ? c.neg : c.fg }}>
+                {net > dust ? `${first} owes you ₹${inr(net)}` : net < -dust ? `You owe ${first} ₹${inr(-net)}` : 'All settled up'}
               </Text>
               {whyYouPay(you, id, store.expenses, store.settlements).map((line, i) => (
                 <Text key={`${line.expenseId ?? line.kind}-${i}`} style={{ fontFamily: font.body, fontSize: 13.5, color: c.mut, marginTop: 6 }}>
                   {line.direction === 'owe' ? 'You owe' : `${first} owes you`} ₹{inr(line.amount)} · {line.label}
                 </Text>
               ))}
-              {balance?.groups.filter((g) => Math.abs(g.net) > 0.5).map((g) => {
+              {balance?.groups.filter((g) => Math.abs(g.net) > dust).map((g) => {
                 const group = store.groups.find((x) => x.id === g.groupId);
                 if (!group) return null;
                 return (
@@ -120,6 +124,7 @@ export default function PersonScreen() {
           </View>
         )}
       </ScrollView>
+      </SwipeShift>
     </View>
   );
 }

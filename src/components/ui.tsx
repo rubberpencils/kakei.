@@ -4,6 +4,7 @@ import { router, useRouter } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   BackHandler,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -202,6 +203,20 @@ export function Toggle({ on, onPress }: { on: boolean; onPress: () => void }) {
       <View style={[styles.knob, { backgroundColor: c.bg, transform: [{ translateX: on ? 18 : 0 }] }]} />
     </Press>
   );
+}
+
+/** Finger moves left for the next item, right for the previous. Vertical scrolls are left alone. */
+export function SwipeShift({ onNext, onPrev, children }: { onNext: () => void; onPrev: () => void; children: ReactNode }) {
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 28 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx <= -56) onNext();
+        else if (g.dx >= 56) onPrev();
+      },
+    }),
+  ).current;
+  return <View {...pan.panHandlers}>{children}</View>;
 }
 
 export function TagPicker({

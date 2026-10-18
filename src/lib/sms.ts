@@ -5,6 +5,32 @@ import { isPersonalSender } from './sender';
 export type InboxRow = { sender: string; body: string; date: number; id?: string };
 export { isPersonalSender };
 
+export async function syncSmsBridge(on: boolean, tags: Record<string, string>) {
+  if (Platform.OS !== 'android') return;
+  try {
+    const mod = await import('../../modules/kakie-sms');
+    await mod.setSmsNotify(on);
+    await mod.setMerchantTags(JSON.stringify(tags));
+  } catch {
+    /* The installed build is older than this screen. */
+  }
+}
+
+export async function drainFileActions(): Promise<{ id: string; kind: string; tag: string }[]> {
+  if (Platform.OS !== 'android') return [];
+  try {
+    const mod = await import('../../modules/kakie-sms');
+    return await mod.drainFileActions();
+  } catch {
+    return [];
+  }
+}
+
+export async function showTestSms() {
+  const mod = await import('../../modules/kakie-sms');
+  await mod.showTestSms();
+}
+
 export async function drainDeviceSms(): Promise<InboxRow[]> {
   if (Platform.OS !== 'android') return [];
   try {

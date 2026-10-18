@@ -5,6 +5,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { Input } from '@/components/input';
 import { Press, Section, Segmented, SettleRow, TxnRow, Word, useDark, usePalette } from '@/components/ui';
+import { SwipeShift } from '@/components/ui';
 import { dayKey, inr, monthName, pad } from '@/lib/format';
 import { cashFlow, detectSubs, monthBounds, personName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
@@ -107,6 +108,7 @@ export default function Insights() {
   };
 
   return (
+    <SwipeShift onNext={() => range !== 'custom' && shift(1)} onPrev={() => range !== 'custom' && shift(-1)}>
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={{ paddingTop: insets.top + 16, paddingHorizontal: 20, paddingBottom: 120 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 }}>
         <Word size={28}>Insights</Word>
@@ -316,6 +318,7 @@ export default function Insights() {
       ))}
       {merchants.length === 0 ? <Text style={{ fontFamily: font.body, color: c.mut, paddingHorizontal: 4 }}>Nothing yet.</Text> : null}
     </ScrollView>
+    </SwipeShift>
   );
 }
 

@@ -1,7 +1,7 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic.ts';
 import { isPersonalSender } from './sender.ts';
 import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, readMoney, spanContext } from './parser.ts';
-import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, whyYouPay, youBalances } from './ledger.ts';
+import { cardBills, cashFlow, detectSubs, dueRecurring, equalShares, exactSteps, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, round2, simplify, spendIn, whyYouPay, youBalances } from './ledger.ts';
 import { handleMcp, type McpData } from './mcp.ts';
 import type { Expense, Settlement } from './types.ts';
 
@@ -53,6 +53,10 @@ eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100,
 eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100, 200_000), false, 'the same spend after 3 minutes is kept');
 
 const shares = equalShares(4800, ['ananya', 'aarav', 'meera', 'kabir']);
+const three = equalShares(100, ['a', 'b', 'c']);
+eq(three.a, 33.33, 'the first share is floored to paise');
+eq(three.c, 33.34, 'the last person takes the odd paisa');
+eq(round2(three.a + three.b + three.c), 100, 'the shares add up');
 eq(Object.values(shares).reduce((a, b) => a + b, 0), 4800, 'shares');
 
 const dinner: Expense = {

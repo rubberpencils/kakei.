@@ -165,6 +165,32 @@ class KakieSmsModule : Module() {
       SmsInbox.drain(context)
     }
 
+    AsyncFunction("setSmsNotify") { on: Boolean ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      SmsInbox.setNotify(context, on)
+      null
+    }
+
+    AsyncFunction("setMerchantTags") { json: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      SmsInbox.setTags(context, json)
+      null
+    }
+
+    AsyncFunction("drainFileActions") {
+      val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, String>>()
+      SmsInbox.drainActions(context)
+    }
+
+    AsyncFunction("showTestSms") {
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      val body = "Sent Rs.42.50\nTo Chai\nUPI"
+      val id = SmsInbox.push(context, "VM-HDFCBK", body, System.currentTimeMillis())
+      SmsReceiver.post(context, id, body)
+      ping?.invoke()
+      null
+    }
+
     AsyncFunction("showNote") { title: String, body: String, id: Int ->
       val context = appContext.reactContext ?: return@AsyncFunction null
       val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager

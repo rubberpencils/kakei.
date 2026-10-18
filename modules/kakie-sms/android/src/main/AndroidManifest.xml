@@ -25,6 +25,13 @@
       </intent-filter>
     </receiver>
     <receiver
+      android:name="expo.modules.kakiesms.FileActionReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="expo.modules.kakiesms.FILE" />
+      </intent-filter>
+    </receiver>
+    <receiver
       android:name="expo.modules.kakiesms.CashWidget"
       android:exported="true"
       android:label="Add cash">

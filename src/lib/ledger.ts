@@ -37,6 +37,8 @@ export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+const dust = 0.005;
+
 function expenseDebts(e: Expense): Debt[] {
   if (!e.shares) return [];
   const paid = new Map<string, number>();
@@ -47,18 +49,18 @@ function expenseDebts(e: Expense): Debt[] {
   const touch = (id: string, d: number) => net.set(id, round2((net.get(id) || 0) + d));
   for (const [id, share] of Object.entries(e.shares)) touch(id, -share);
   for (const [id, v] of paid) touch(id, v);
-  const cred = [...net.entries()].filter(([, v]) => v > 0.5).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
-  const deb = [...net.entries()].filter(([, v]) => v < -0.5).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const cred = [...net.entries()].filter(([, v]) => v > dust).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -dust).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
   const out: Debt[] = [];
   let i = 0;
   let j = 0;
   while (i < cred.length && j < deb.length) {
     const amt = Math.min(cred[i].v, deb[j].v);
-    if (amt > 0.5) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    if (amt > dust) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
     cred[i].v -= amt;
     deb[j].v -= amt;
-    if (cred[i].v < 0.5) i += 1;
-    if (deb[j].v < 0.5) j += 1;
+    if (cred[i].v < dust) i += 1;
+    if (deb[j].v < dust) j += 1;
   }
   return out;
 }
@@ -101,8 +103,8 @@ export function pairDebts(expenses: Expense[], settlements: Settlement[], groupI
     seen.add(k);
     seen.add(revK);
     const net = round2(v - rev);
-    if (net > 0.5) out.push({ fromId: from, toId: to, amount: net });
-    else if (net < -0.5) out.push({ fromId: to, toId: from, amount: round2(-net) });
+    if (net > dust) out.push({ fromId: from, toId: to, amount: net });
+    else if (net < -dust) out.push({ fromId: to, toId: from, amount: round2(-net) });
   }
   return out.sort((a, b) => b.amount - a.amount);
 }
@@ -113,18 +115,18 @@ export function simplify(debts: Debt[]): Debt[] {
     net.set(d.fromId, round2((net.get(d.fromId) || 0) - d.amount));
     net.set(d.toId, round2((net.get(d.toId) || 0) + d.amount));
   }
-  const cred = [...net.entries()].filter(([, v]) => v > 0.5).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
-  const deb = [...net.entries()].filter(([, v]) => v < -0.5).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
+  const cred = [...net.entries()].filter(([, v]) => v > dust).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v);
+  const deb = [...net.entries()].filter(([, v]) => v < -dust).map(([k, v]) => ({ k, v: -v })).sort((a, b) => b.v - a.v);
   const out: Debt[] = [];
   let i = 0;
   let j = 0;
   while (i < cred.length && j < deb.length) {
     const amt = Math.min(cred[i].v, deb[j].v);
-    if (amt > 0.5) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
+    if (amt > dust) out.push({ fromId: deb[j].k, toId: cred[i].k, amount: round2(amt) });
     cred[i].v -= amt;
     deb[j].v -= amt;
-    if (cred[i].v < 0.5) i += 1;
-    if (deb[j].v < 0.5) j += 1;
+    if (cred[i].v < dust) i += 1;
+    if (deb[j].v < dust) j += 1;
   }
   return out;
 }
@@ -194,19 +196,19 @@ export function exactSteps(pairs: Debt[], simple: Debt[]): ExactStep[] {
   for (const s of simple) {
     const because: ExactStep['because'] = [];
     let need = s.amount;
-    const direct = left.find((d) => d.fromId === s.fromId && d.toId === s.toId && d.amount > 0.5);
+    const direct = left.find((d) => d.fromId === s.fromId && d.toId === s.toId && d.amount > dust);
     if (direct) {
       const take = Math.min(direct.amount, need);
       direct.amount = round2(direct.amount - take);
       need = round2(need - take);
     }
     for (const hop of left) {
-      if (need <= 0.5) break;
-      if (hop.fromId !== s.fromId || hop.amount <= 0.5) continue;
-      const onward = left.find((d) => d.fromId === hop.toId && d.toId === s.toId && d.amount > 0.5);
+      if (need <= dust) break;
+      if (hop.fromId !== s.fromId || hop.amount <= dust) continue;
+      const onward = left.find((d) => d.fromId === hop.toId && d.toId === s.toId && d.amount > dust);
       if (!onward) continue;
       const take = Math.min(hop.amount, onward.amount, need);
-      if (take <= 0.5) continue;
+      if (take <= dust) continue;
       hop.amount = round2(hop.amount - take);
       onward.amount = round2(onward.amount - take);
       need = round2(need - take);
@@ -323,7 +325,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
       if (!target) continue;
       target.due = round2(Math.max(0, target.due - e.amount));
       target.lastPaid = e.at;
-      if (target.due < 0.5) target.charges = [];
+      if (target.due < dust) target.charges = [];
       continue;
     }
     if (e.rail !== 'credit') continue;
@@ -333,7 +335,7 @@ export function cardBills(expenses: Expense[], youId: string): CardBill[] {
     c.due = round2(c.due + e.amount);
     c.charges.unshift(e);
   }
-  return [...cards.values()].filter((c) => c.due >= 0.5).sort((a, b) => b.due - a.due);
+  return [...cards.values()].filter((c) => c.due >= dust).sort((a, b) => b.due - a.due);
 }
 
 export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
@@ -358,7 +360,7 @@ export function remainingOwed(expenses: Expense[], settlements: Settlement[]) {
         const pay = Math.min(due, left);
         rem[e.id][s.fromId] = round2(due - pay);
         left = round2(left - pay);
-        if (left < 0.5) break;
+        if (left < dust) break;
       }
     }
   }
