@@ -54,14 +54,19 @@ function titleCase(s: string) {
 
 function cleanMerchant(raw: string) {
   let t = raw.replace(/\s+/g, ' ').replace(/[.,]+$/g, '').trim();
+  t = t.replace(/^(refund|reversal)\s+(from|of)\s+/i, '');
   t = t.replace(/\b(PVT LTD|PRIVATE LIMITED|LTD)\b.*/i, '');
   t = t.replace(/\bSALARY\b.*/i, '');
   t = t.replace(/\bPAY IN\b.*/i, '');
+  t = t.replace(/\bUPI\b/gi, '');
+  t = t.replace(/\d{6,}/g, '');
   t = t.replace(/\s+/g, ' ').trim();
   if (!t) return 'Payment';
   if (t === t.toUpperCase()) return titleCase(t);
   return t;
 }
+
+export { cleanMerchant };
 
 function merchantFrom(body: string) {
   const vpa = body.match(/vpa\s+([a-z0-9._-]+)@/i);
@@ -101,6 +106,7 @@ function parseWhen(body: string) {
 export function parseSms(sender: string, body: string): ParsedSms | null {
   if (!body || body.length < 12) return null;
   if (/\botp\b|one time password|do not share|verification code/i.test(body)) return null;
+  if (/\b(failed|unsuccessful|declined)\b/i.test(body)) return null;
   const amt = body.match(/(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
   if (!amt) return null;
   const amount = Number(amt[1].replace(/,/g, ''));
@@ -137,4 +143,68 @@ export function parseSms(sender: string, body: string): ParsedSms | null {
     account,
     at: parseWhen(body),
   };
+}
+
+export type FormatRule = {
+  sender: string;
+  amountBefore: string;
+  amountAfter: string;
+  merchantBefore: string;
+  merchantAfter: string;
+};
+
+export type MerchantRule = { key: string; tag?: string; groupId?: string };
+
+export type Hit = { merchant: string; amount: number; at: number };
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function spanContext(body: string, slice: string) {
+  const i = body.indexOf(slice);
+  if (i < 0 || !slice) return null;
+  return { before: body.slice(Math.max(0, i - 12), i), after: body.slice(i + slice.length, i + slice.length + 12) };
+}
+
+function capture(body: string, before: string, after: string) {
+  if (!before && !after) return null;
+  const m = body.match(new RegExp(esc(before) + '([0-9][0-9,]*(?:\\.[0-9]{1,2})?)' + esc(after)));
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, ''));
+  return n > 0 ? n : null;
+}
+
+function captureText(body: string, before: string, after: string) {
+  if (!before && !after) return null;
+  const m = body.match(new RegExp(esc(before) + '(.{2,40}?)' + esc(after)));
+  return m ? m[1].trim() : null;
+}
+
+export function parseWithRules(sender: string, body: string, formats: FormatRule[], merchants: MerchantRule[]): ParsedSms | null {
+  let parsed = parseSms(sender, body);
+  const taught = formats.find((r) => r.sender === sender);
+  if (!parsed && taught) {
+    const amount = capture(body, taught.amountBefore, taught.amountAfter);
+    if (amount) {
+      const merchant = cleanMerchant(captureText(body, taught.merchantBefore, taught.merchantAfter) || 'Payment');
+      parsed = {
+        bank: BANKS.find(([re]) => re.test(sender.toUpperCase()))?.[1] ?? 'Bank',
+        amount,
+        income: false,
+        transfer: false,
+        merchant,
+        rail: 'upi',
+        tag: suggestTag(merchant, false, false),
+        account: null,
+        at: parseWhen(body),
+      };
+    }
+  }
+  if (!parsed) return null;
+  const rule = merchants.find((r) => r.key === parsed.merchant.toLowerCase());
+  return rule?.tag ? { ...parsed, tag: rule.tag } : parsed;
+}
+
+export function isRecentDupe(hits: Hit[], merchant: string, amount: number, at: number) {
+  const key = merchant.toLowerCase();
+  return hits.some((h) => h.merchant === key && h.amount === amount && Math.abs(h.at - at) < 180_000);
 }

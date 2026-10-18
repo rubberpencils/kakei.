@@ -27,11 +27,17 @@ export default function Review() {
   const [reflect, setReflect] = useState(true);
   const [paste, setPaste] = useState('');
   const [seenId, setSeenId] = useState(cur?.id);
+  const [amountSlice, setAmountSlice] = useState('');
+  const [merchantSlice, setMerchantSlice] = useState('');
 
   if (cur && cur.id !== seenId) {
     setSeenId(cur.id);
     setTag(cur.tag);
-    setGroupOn(want === cur.id && file === 'split');
+    setAmountSlice('');
+    setMerchantSlice('');
+    const learned = store.rules.find((r) => r.key === cur.merchant.toLowerCase());
+    setGroupOn(Boolean(learned?.groupId) || (want === cur.id && file === 'split'));
+    if (learned?.groupId) setGroupId(learned.groupId);
   }
 
   useEffect(() => {
@@ -42,15 +48,18 @@ export default function Review() {
     if (!cur) return;
     const chosen = tag;
     if (groupOn && groupId === 'quick') {
+      store.remember(cur.merchant, chosen, null);
       router.push({ pathname: '/quick-split', params: { draftId: cur.id, tag: chosen ?? '' } });
       return;
     }
     if (groupOn && groups.some((g) => g.id === groupId)) {
+      store.remember(cur.merchant, chosen, groupId);
       router.push({ pathname: '/split', params: { groupId, draftId: cur.id, reflect: reflect ? '1' : '0', tag: chosen ?? '' } });
       return;
     }
     buzz('done');
-    store.confirmDraft(cur.id, { tag: chosen });
+    store.remember(cur.merchant, chosen, groupOn && groupId !== 'quick' ? groupId : null);
+    store.confirmDraft(cur.id, { tag: chosen, groupId: groupOn && groupId !== 'quick' ? groupId : null });
     store.flash(cur.transfer ? 'Card bill saved. Not counted as spend.' : 'Saved');
   };
 
@@ -86,6 +95,27 @@ export default function Review() {
             </View>
             <Text style={{ fontFamily: font.mono, fontSize: 12, lineHeight: 18, color: c.mut }}>{cur.body}</Text>
           </View>
+          {cur.amount <= 0 ? (
+            <View style={{ marginTop: 18 }}>
+              <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.fg }}>This format is new</Text>
+              <Text style={{ fontFamily: font.body, fontSize: 13, color: c.mut, marginTop: 4, lineHeight: 18 }}>Tap the amount, then the merchant. Kakei will use that shape for the next message from {cur.sender}.</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
+                {cur.body.split(/\s+/).filter(Boolean).map((word, i) => {
+                  const on = word === amountSlice || word === merchantSlice;
+                  return (
+                    <Press key={`${word}-${i}`} onPress={() => { if (!amountSlice) setAmountSlice(word); else if (!merchantSlice) setMerchantSlice(word); else { setAmountSlice(word); setMerchantSlice(''); } }} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: on ? c.acc : c.line }}>
+                      <Text style={{ fontFamily: font.mono, fontSize: 12, color: c.fg }}>{word}</Text>
+                    </Press>
+                  );
+                })}
+              </View>
+              <Text style={{ fontFamily: font.mono, fontSize: 12, color: c.mut, marginTop: 12 }}>Amount: {amountSlice || '—'} · Merchant: {merchantSlice || '—'}</Text>
+              <Press onPress={() => { if (store.teach(cur.id, amountSlice, merchantSlice)) store.flash('Format saved'); else store.flash('Could not read an amount there'); }} style={{ marginTop: 14, height: 44, borderRadius: 22, backgroundColor: c.acc, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: font.medium, color: c.accFg }}>Use this format</Text>
+              </Press>
+            </View>
+          ) : (
+          <>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 24 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: font.semi, fontSize: 20, color: c.fg }}>{cur.merchant}</Text>
@@ -134,6 +164,8 @@ export default function Review() {
               ) : null}
             </View>
           ) : null}
+          </>
+          )}
           </Animated.View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 28 }}>

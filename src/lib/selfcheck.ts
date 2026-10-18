@@ -1,6 +1,6 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
 import { isPersonalSender } from './sender';
-import { parseSms } from './parser';
+import { cleanMerchant, isRecentDupe, parseSms, parseWithRules, spanContext } from './parser';
 import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
 import type { Expense, Settlement } from './types';
@@ -29,6 +29,25 @@ for (const [sender, body, expect] of samples) {
 }
 
 eq(parseSms('VM-HDFCBK', 'OTP is 482913. Do not share it with anyone.'), null, 'otp');
+eq(parseSms('VM-HDFCBK', 'Rs.120.00 debit failed for A/c XX4521. Transaction unsuccessful.') , null, 'failed debit is ignored');
+eq(parseSms('VM-HDFCBK', 'Rs.250.00 credited to A/c XX4521 on 02-10-26 towards refund from SWIGGY.')?.income, true, 'a refund is money in');
+eq(parseSms('VM-HDFCBK', 'Rs.250.00 credited to A/c XX4521 on 02-10-26 towards refund from SWIGGY.')?.merchant, 'Swiggy', 'refund merchant is cleaned');
+eq(parseSms('AX-AXISBK', 'INR 199.00 debited from A/c XX3308 on 01-10-26 towards Netflix Autopay.')?.tag, 'entertainment', 'autopay keeps the merchant tag');
+eq(parseSms('VM-HDFCBK', 'Rs.40.00 debited from UPI Lite on 03-10-26 to VPA chai@okhdfcbank.')?.rail, 'upi', 'upi lite stays upi');
+eq(parseSms('VM-HDFCBK', 'Rs.499.00 credited to A/c XX4521 on 02-10-26. Transaction reversed for SWIGGY.')?.income, true, 'a reversal is money back');
+eq(cleanMerchant('SWIGGY UPI 123456789012'), 'Swiggy', 'merchant drops upi and a long ref');
+const taughtBody = 'Wallet paid CAFE MOCHA at the counter ref 80.00 done';
+const nextBody = 'Wallet paid CAFE MOCHA at the counter ref 90.00 done';
+const amountAt = spanContext(taughtBody, '80.00');
+const merchantAt = spanContext(taughtBody, 'CAFE MOCHA');
+if (!amountAt || !merchantAt) throw new Error('span');
+const taught = parseWithRules('VM-NEWBK', nextBody, [{
+  sender: 'VM-NEWBK', amountBefore: amountAt.before, amountAfter: amountAt.after, merchantBefore: merchantAt.before, merchantAfter: merchantAt.after,
+}], [{ key: 'cafe mocha', tag: 'coffee' }]);
+eq(taught?.amount, 90, 'a taught format reads the next amount');
+eq(taught?.tag, 'coffee', 'a learned merchant sets the tag');
+eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100, 20_000), true, 'the same merchant and amount within 3 minutes is a duplicate');
+eq(isRecentDupe([{ merchant: 'swiggy', amount: 100, at: 1_000 }], 'Swiggy', 100, 200_000), false, 'the same spend after 3 minutes is kept');
 
 const shares = equalShares(4800, ['ananya', 'aarav', 'meera', 'kabir']);
 eq(Object.values(shares).reduce((a, b) => a + b, 0), 4800, 'shares');

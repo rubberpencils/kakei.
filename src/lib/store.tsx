@@ -5,7 +5,7 @@ import { AppState } from 'react-native';
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { initials, localNoon, slugTag, uid } from './format';
 import { dueRecurring, equalShares } from './ledger';
-import { parseSms } from './parser';
+import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
 import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
@@ -30,6 +30,9 @@ type Local = {
   queue: Draft[];
   seen: string[];
   smsOn: boolean;
+  rules: MerchantRule[];
+  formats: FormatRule[];
+  recent: Hit[];
   dev: DevSettings;
   // Local mode: no account, no server. Everything lives on this phone.
   local: boolean;
@@ -58,6 +61,9 @@ const FRESH: Local = {
   queue: [],
   seen: [],
   smsOn: false,
+  rules: [],
+  formats: [],
+  recent: [],
   dev: { mcp: false, lan: false, port: 8765, token: '' },
   local: false,
   connecting: false,
@@ -223,9 +229,15 @@ function rebase(s: Local, r: Remote): Local {
   return due.length ? enqueue(next, due.map((expense) => ({ type: 'expense.upsert', expense }))) : next;
 }
 
-function draftFrom(sender: string, body: string, at: string, key: string, id?: string): Draft | null {
-  const parsed = parseSms(sender, body);
-  if (!parsed) return null;
+function draftFrom(sender: string, body: string, at: string, key: string, rules: MerchantRule[], formats: FormatRule[], id?: string): Draft | null {
+  const parsed = parseWithRules(sender, body, formats, rules);
+  if (!parsed) {
+    if (body.trim().length < 12) return null;
+    return {
+      id: id ?? uid(), key, sender, body, bank: 'Bank', at, amount: 0, income: false, transfer: false,
+      merchant: '', rail: 'upi', tag: null, account: null,
+    };
+  }
   return {
     id: id ?? uid(), key, sender, body,
     bank: parsed.bank,
@@ -243,15 +255,20 @@ function draftFrom(sender: string, body: string, at: string, key: string, id?: s
 function addDrafts(s: Local, rows: SmsIn[]) {
   const seen = new Set(s.seen);
   const fresh: Draft[] = [];
+  const recent = [...s.recent];
   for (const row of rows) {
-    const key = `${row.sender}|${row.date}|${row.body.length}`;
+    const key = `${row.sender}\n${row.body}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const d = new Date(row.date);
-    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key, row.id);
-    if (draft) fresh.push(draft);
+    const at = d.getTime();
+    const draft = draftFrom(row.sender, row.body, localNoon(d.getFullYear(), d.getMonth() + 1, d.getDate()), key, s.rules, s.formats, row.id);
+    if (!draft) continue;
+    if (draft.amount > 0 && draft.merchant && isRecentDupe(recent, draft.merchant, draft.amount, at)) continue;
+    if (draft.amount > 0 && draft.merchant) recent.push({ merchant: draft.merchant.toLowerCase(), amount: draft.amount, at });
+    fresh.push(draft);
   }
-  return { next: { ...s, seen: [...seen].slice(-2000), queue: [...fresh, ...s.queue] }, added: fresh.length };
+  return { next: { ...s, seen: [...seen].slice(-2000), recent: recent.slice(-50), queue: [...fresh, ...s.queue] }, added: fresh.length };
 }
 
 type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
@@ -285,6 +302,8 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   ignoreDraft: (id: string) => void;
   skipDraft: (id: string) => void;
   focusDraft: (id: string) => void;
+  teach: (id: string, amountSlice: string, merchantSlice: string) => boolean;
+  remember: (merchant: string, tag: string | null, groupId?: string | null) => void;
   settle: (s: Omit<Settlement, 'id' | 'sample'>) => void;
   createGroup: (name: string, memberNames: string[], icon?: string) => string;
   groupFromExpense: (expenseId: string, name: string, memberNames: string[], icon?: string) => string | null;
@@ -359,6 +378,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         queue: x.queue,
         seen: x.seen,
         smsOn: x.smsOn,
+        rules: x.rules,
+        formats: x.formats,
+        recent: x.recent,
         dev: x.dev,
         tags: x.tags,
         budget: x.budget,
@@ -431,7 +453,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const same = x.you.id === res.you.id;
           return {
-            ...(same ? x : { ...FRESH, queue: x.queue, seen: x.seen, smsOn: x.smsOn }),
+            ...(same ? x : { ...FRESH, queue: x.queue, seen: x.seen, smsOn: x.smsOn, rules: x.rules, formats: x.formats, recent: x.recent }),
             base,
             token: res.token,
             you: person(res.you.id, res.you.name),
@@ -514,7 +536,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       confirmDraft: (id, opts) => {
         const x = cur.current;
         const d = x.queue.find((q) => q.id === id);
-        if (!d) return;
+        if (!d || d.amount <= 0) return;
         const group = opts.groupId ? x.groups.find((g) => g.id === opts.groupId) : null;
         const members = group ? [x.you.id, ...group.memberIds] : [];
         const expense: Expense = {
@@ -538,7 +560,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         };
         const ops: Op[] = [{ type: 'expense.upsert', expense }];
         if (opts.tag && !x.tags.includes(opts.tag)) ops.push({ type: 'prefs.set', prefs: { tags: [...x.tags, opts.tag] } });
-        setS((y) => ({ ...enqueue(y, ops), queue: y.queue.filter((q) => q.id !== id) }));
+        const key = d.merchant.toLowerCase();
+        const rules = opts.tag || opts.groupId
+          ? [...x.rules.filter((r) => r.key !== key), { key, ...(opts.tag ? { tag: opts.tag } : {}), ...(opts.groupId ? { groupId: opts.groupId } : {}) }]
+          : x.rules;
+        setS((y) => ({ ...enqueue(y, ops), rules, queue: y.queue.filter((q) => q.id !== id) }));
       },
       ignoreDraft: (id) => setS((x) => ({ ...x, queue: x.queue.filter((q) => q.id !== id) })),
       skipDraft: (id) => setS((x) => {
@@ -555,6 +581,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const [item] = queue.splice(i, 1);
         return { ...x, queue: [item, ...queue] };
       }),
+      teach: (id, amountSlice, merchantSlice) => {
+        const x = cur.current;
+        const d = x.queue.find((q) => q.id === id);
+        const amount = d ? spanContext(d.body, amountSlice) : null;
+        const merchant = d ? spanContext(d.body, merchantSlice) : null;
+        if (!d || !amount || !merchant) return false;
+        const formats = [
+          ...x.formats.filter((f) => f.sender !== d.sender),
+          { sender: d.sender, amountBefore: amount.before, amountAfter: amount.after, merchantBefore: merchant.before, merchantAfter: merchant.after },
+        ];
+        const parsed = parseWithRules(d.sender, d.body, formats, x.rules);
+        if (!parsed || parsed.amount <= 0) {
+          setS((y) => ({ ...y, formats }));
+          return false;
+        }
+        setS((y) => ({
+          ...y,
+          formats,
+          queue: y.queue.map((q) => q.id === id ? {
+            ...q,
+            bank: parsed.bank,
+            amount: parsed.amount,
+            merchant: parsed.merchant,
+            tag: parsed.tag,
+            rail: parsed.rail,
+            at: parsed.at ?? q.at,
+            account: parsed.account,
+          } : q),
+        }));
+        return true;
+      },
+      remember: (merchant, tag, groupId) => {
+        const key = merchant.trim().toLowerCase();
+        if (!key || (!tag && !groupId)) return;
+        setS((x) => ({
+          ...x,
+          rules: [...x.rules.filter((r) => r.key !== key), { key, ...(tag ? { tag } : {}), ...(groupId ? { groupId } : {}) }],
+        }));
+      },
       settle: (row) => {
         commit([{ type: 'settlement.upsert', settlement: { ...row, id: uid() } }]);
         flash('Settlement recorded');
@@ -681,7 +746,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const key = `text|${sender}|${body.slice(0, 80)}`;
         const x = cur.current;
         if (x.seen.includes(key)) return x.queue.some((q) => q.key === key);
-        const draft = draftFrom(sender, body, new Date().toISOString(), key);
+        const draft = draftFrom(sender, body, new Date().toISOString(), key, x.rules, x.formats);
         setS((y) => ({ ...y, seen: [...y.seen, key], queue: draft ? [draft, ...y.queue] : y.queue }));
         return !!draft;
       },
