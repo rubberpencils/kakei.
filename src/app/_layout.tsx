@@ -81,6 +81,7 @@ function Shell() {
             <Stack.Screen name="balances" />
             <Stack.Screen name="card-bill" />
             <Stack.Screen name="pro" />
+            <Stack.Screen name="ask" />
           </Stack.Protected>
           <Stack.Protected guard={!entered}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />

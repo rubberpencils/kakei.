@@ -22,7 +22,7 @@ const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH = /^(\d{4})-(\d{2})$/;
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: 'get_summary',
     description:

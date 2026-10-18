@@ -103,6 +103,7 @@ export function createApp(db: DatabaseSync, opts: {
   otpUrl?: string;
   sendOtp?: (phone: string, code: string) => void | Promise<void>;
   verifyPlay?: (purchaseToken: string, productId: string) => Promise<{ expiry: number }>;
+  complete?: (history: { role: string; parts: Record<string, unknown>[] }[]) => Promise<{ role?: string; parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] }>;
 }) {
   // Tests pass no key and get a throwaway one. The real server always passes one (see index.ts).
   const vault = makeVault(opts.key ?? randomBytes(32));
@@ -396,6 +397,40 @@ export function createApp(db: DatabaseSync, opts: {
       : { you: { id: row.user_id, name: owner?.name ?? 'You', initials: 'YO' }, people: [], groups: [], expenses: [], settlements: [], budget: 0 };
     const answered = answerMcp(JSON.stringify(await readBody(req, 1_000_000)), data);
     return { mcpStatus: answered.status, mcpBody: answered.body };
+  }
+
+  async function ask(user: User, body: Row) {
+    if (body.consent !== true) fail(400, 'Ask needs a yes first');
+    if (!isPro(user.id)) fail(402, 'Pro is required');
+    const settings = readSettings(user.id);
+    settings.ask = true;
+    writeSettings(user.id, settings);
+    if (!opts.complete) fail(501, 'This server has no AI key');
+    const question = typeof body.question === 'string' ? body.question.trim() : '';
+    const toolResults = Array.isArray(body.toolResults) ? body.toolResults : null;
+    if (!question && !toolResults) return { ok: true };
+    const ym = new Date().toISOString().slice(0, 7);
+    const used = one('select n from ai_usage where user_id = ? and ym = ?', user.id, ym)?.n ?? 0;
+    if (used >= 30) fail(429, 'The monthly Ask limit is used up');
+    run(
+      'insert into ai_usage (user_id, ym, n) values (?, ?, ?) on conflict(user_id, ym) do update set n = n + 1',
+      user.id, ym, Number(used) + 1,
+    );
+    const history = Array.isArray(body.history) ? body.history as { role: string; parts: Record<string, unknown>[] }[] : [];
+    if (question) history.push({ role: 'user', parts: [{ text: question }] });
+    if (toolResults) history.push({ role: 'user', parts: toolResults.map((item) => ({ functionResponse: item })) });
+    let reply: { parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] };
+    try {
+      reply = await opts.complete(history);
+    } catch (err) {
+      fail(502, err instanceof Error ? err.message : 'The model did not answer');
+    }
+    const parts = reply.parts ?? [];
+    return {
+      history: [...history, { role: 'model', parts }],
+      text: parts.map((part) => part.text).filter(Boolean).join('\n'),
+      toolCalls: parts.filter((part) => part.functionCall).map((part) => ({ name: part.functionCall!.name, args: part.functionCall!.args ?? {} })),
+    };
   }
 
   function auth(req: IncomingMessage): User {
@@ -754,6 +789,7 @@ export function createApp(db: DatabaseSync, opts: {
     if (method === 'POST' && path === '/mcp/disable') return mcpSet(user, false);
     if (method === 'POST' && path === '/mcp/regenerate') return mcpRegenerate(user);
     if (method === 'POST' && path === '/mcp/snapshot') return mcpSnapshot(user, await readBody(req, 8_000_000));
+    if (method === 'POST' && path === '/ai/ask') return ask(user, await readBody(req));
     if (method === 'GET' && path === '/account/export') return accountExport(user);
     if (method === 'POST' && path === '/account/delete') return deleteAccount(user, await readBody(req));
     if (method === 'GET' && path === '/sync') return sync(user);

@@ -201,6 +201,9 @@ try {
   db.prepare('update users set pro_until = ? where id = ?').run(Date.now() + 60_000, third.json.you.id);
   const other = await call('POST', '/mcp/create', third.json.token, { confirm: true });
   eq(other.json.publicId !== pub, true, 'each account has its own public id');
+  const free = await signup('Free', '9000000077', 'secret1');
+  eq((await call('POST', '/ai/ask', free.json.token, { consent: true, question: 'What did I spend?' })).status, 402, 'ask is pro');
+  eq((await call('POST', '/ai/ask', B, { consent: true, question: 'What did I spend?' })).status, 501, 'this server has no AI key');
   eq((await call('POST', '/billing/play', B, { purchaseToken: 'tok', productId: 'kakei_pro_monthly' })).status, 501, 'this server does not sell Pro');
   const sellingDb = openDb(':memory:');
   const selling = createApp(sellingDb, {

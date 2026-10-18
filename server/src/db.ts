@@ -73,6 +73,12 @@ export function openDb(path: string) {
       snapshot text,
       updated integer not null
     );
+    create table if not exists ai_usage (
+      user_id text not null references users(id) on delete cascade,
+      ym text not null,
+      n integer not null,
+      primary key (user_id, ym)
+    );
     create table if not exists settings (
       user_id text primary key references users(id) on delete cascade,
       data text not null

@@ -5,10 +5,11 @@ import { AppState } from 'react-native';
 import { ApiError, call, cleanBase, DEFAULT_API, type Invite, type Op, type Queued, type Remote } from './api';
 import { openBackup, sealBackup } from './backup';
 import { initials, localNoon, slugTag, uid } from './format';
-import { dueRecurring, equalShares, tagSpend } from './ledger';
+import { dueRecurring, equalShares, friendBalances, monthBounds, spendIn, tagSpend } from './ledger';
 import { parseWithRules, isRecentDupe, spanContext, type FormatRule, type Hit, type MerchantRule } from './parser';
 import { sampleData, TAGS } from './seed';
 import { onBankSms, readDeviceSms, drainDeviceSms } from './sms';
+import { handleMcp } from './mcp';
 import { showNote } from './notify';
 import type { Draft, Expense, Group, MonthSnapshot, Person, Settlement } from './types';
 
@@ -56,6 +57,9 @@ type Local = {
   // Older versions uploaded personal spends. Set once the server has been asked to forget them.
   cleaned: boolean;
   pro: boolean;
+  askOk: boolean;
+  digest: boolean;
+  sunday: string;
 };
 
 const NOBODY: Person = { id: 'me', name: 'You', initials: 'YO' };
@@ -88,6 +92,9 @@ const FRESH: Local = {
   syncedAt: null,
   cleaned: false,
   pro: false,
+  askOk: false,
+  digest: false,
+  sunday: '',
 };
 
 type SmsIn = { sender: string; body: string; date: number; id?: string };
@@ -242,6 +249,7 @@ function rebase(s: Local, r: Remote): Local {
     expenses: [...shared, ...s.expenses.filter((e) => !e.groupId)],
     settlements: r.settlements,
     pro: r.pro === true,
+    askOk: r.settings?.ask === true || s.askOk,
     dev: r.settings?.remoteMcp?.publicId
       ? { ...s.dev, remote: !!r.settings.remoteMcp.enabled, remoteId: r.settings.remoteMcp.publicId, remoteToken: s.dev.remoteId === r.settings.remoteMcp.publicId ? s.dev.remoteToken : '' }
       : s.dev,
@@ -328,6 +336,9 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   setBudget: (n: number) => void;
   setTagBudget: (tag: string, amount: number) => void;
   setLock: (on: boolean) => void;
+  allowAsk: () => Promise<string | null>;
+  askQuestion: (question: string) => Promise<string>;
+  setDigest: (on: boolean) => void;
   markMonthly: (merchant: string) => void;
   addTag: (raw: string) => string | null;
   addExpense: (e: NewExpense) => string;
@@ -652,6 +663,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       },
       setLock: (lock) => setS((x) => ({ ...x, lock })),
+      setDigest: (digest) => setS((x) => ({ ...x, digest })),
+      askQuestion: async (question) => {
+        const x = cur.current;
+        let history: { role: string; parts: Record<string, unknown>[] }[] = [];
+        let text = '';
+        for (let i = 0; i < 4; i++) {
+          const res = await call<{ history?: typeof history; text?: string; toolCalls?: { name: string; args: Record<string, unknown> }[] }>(
+            x.base, x.token, 'POST', '/ai/ask', { consent: true, question: i === 0 ? question : undefined, history },
+          );
+          history = res.history ?? history;
+          if (res.text) text = res.text;
+          const calls = res.toolCalls ?? [];
+          if (!calls.length) break;
+          const data = { you: x.you, people: x.people, groups: x.groups, expenses: x.expenses, settlements: x.settlements, budget: x.budget };
+          const parts = calls.map((tool) => {
+            const ran = handleMcp(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool.name, arguments: tool.args } }), data);
+            return { functionResponse: { name: tool.name, response: JSON.parse(ran.body) } };
+          });
+          history = [...history, { role: 'user', parts }];
+        }
+        return text || 'No answer';
+      },
+      allowAsk: async () => {
+        setS((x) => ({ ...x, askOk: true }));
+        try {
+          await call(cur.current.base, cur.current.token, 'POST', '/ai/ask', { consent: true });
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Could not save';
+        }
+      },
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
       setTagBudget: (tag, amount) => {
         const tagBudgets = { ...cur.current.tagBudgets };
@@ -989,6 +1031,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, 5000);
     return () => clearTimeout(t);
   }, [ready, s.token, s.pro, s.dev.remote, s.expenses, s.groups, s.people, s.settlements, s.budget]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const now = new Date();
+    if (now.getDay() !== 0) return;
+    const day = now.toISOString().slice(0, 10);
+    if (s.sunday === day) return;
+    const t = setTimeout(() => {
+      const x = cur.current;
+      const bounds = monthBounds(now.getFullYear(), now.getMonth() + 1);
+      const spent = spendIn(x.expenses, x.settlements, x.you.id, bounds.from, bounds.to);
+      const owed = friendBalances(x.expenses, x.settlements, x.groups, x.you.id).filter((f) => f.net < -0.5).sort((a, b) => a.net - b.net)[0];
+      const left = Math.round((x.budget || 0) - spent.total);
+      showNote('This Sunday', `Spent ₹${Math.round(spent.total)}. Left ₹${left}.${owed ? ` You owe ₹${Math.round(-owed.net)}.` : ''}`, 7);
+      setS((cur) => ({ ...cur, sunday: day }));
+      if (x.pro && x.digest && x.askOk && x.token) {
+        call<{ text?: string }>(x.base, x.token, 'POST', '/ai/ask', { consent: true, question: 'In one short paragraph, how is this month going?' })
+          .then((res) => { if (res.text) showNote('Sunday digest', res.text.slice(0, 180), 8); })
+          .catch(() => {});
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [ready, s.sunday, s.expenses, s.budget]);
 
   useEffect(() => {
     if (!ready) return;

@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname } from 'node:path';
 
+import { gemini } from './ai.ts';
 import { createApp } from './app.ts';
 import { googleVerifier } from './billing.ts';
+import { TOOLS } from '../../shared/read.ts';
 import { openDb } from './db.ts';
 import { loadKey } from './vault.ts';
 
@@ -29,6 +31,9 @@ const server = createApp(openDb(dbPath), {
   everyonePro: process.env.KAKEI_EVERYONE_PRO !== 'false',
   otpUrl: process.env.SMS_OTP_URL,
   verifyPlay: serviceJson ? googleVerifier(serviceJson) : undefined,
+  complete: process.env.GEMINI_API_KEY
+    ? (history) => gemini(process.env.GEMINI_API_KEY!, history as never, TOOLS)
+    : undefined,
 });
 
 server.listen(port, host, () => {

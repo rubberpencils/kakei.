@@ -152,6 +152,16 @@ export default function Profile() {
           </Press>
         </>
       ) : null}
+      {store.signedIn && store.pro ? (
+        <>
+          <Press onPress={() => router.push('/ask' as never)}>
+            <Row icon="comment-question-outline" title="Ask" sub={store.digest ? 'Sunday digest is on' : 'A question about this phone’s spending'} />
+          </Press>
+          <Row icon="calendar-week" title="Sunday digest" sub="One Pro answer each Sunday, from the same 30">
+            <Switch value={store.digest} onValueChange={store.setDigest} trackColor={{ true: c.acc, false: c.bar }} />
+          </Row>
+        </>
+      ) : null}
       {store.signedIn && !store.pro ? (
         <Press onPress={() => router.push('/pro' as never)}>
           <Row icon="star-outline" title="Kakei Pro" sub="Backup, Ask, and a remote MCP" />
