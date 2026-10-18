@@ -6,9 +6,9 @@ import { Icon, Press, usePalette } from '@/components/ui';
 import { font } from '@/lib/theme';
 
 const POINTS = [
-  { icon: 'cellphone-lock', title: 'Your money stays on this phone', body: 'Spends, budget, tags and bank SMS are stored here. They are never uploaded.' },
-  { icon: 'account-group-outline', title: 'Why there is a server', body: 'Only groups you share go to it, so friends see the same balances. It passes them between phones and keeps nothing else.' },
-  { icon: 'lock-outline', title: 'Encrypted and private', body: 'Shared data travels over HTTPS and is stored encrypted. Passwords are hashed.' },
+  { icon: 'cellphone-lock', title: 'Your money stays on this phone', body: 'Spends, budget, tags and bank SMS stay here. They leave only if you turn on backup or remote MCP.' },
+  { icon: 'account-group-outline', title: 'Shared groups', body: 'Groups you share are sealed on the server. The server can read them so the people in the group stay in sync.' },
+  { icon: 'lock-outline', title: 'Encrypted and private', body: 'Shared data travels over HTTPS and is stored encrypted. Passwords are hashed. Messages from phone numbers are skipped and never opened.' },
   { icon: 'wifi-off', title: 'Works without it', body: 'If the server is down or you are offline, Kakei keeps working and catches up later.' },
 ];
 

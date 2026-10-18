@@ -1,4 +1,5 @@
 import { applyKey, clampCursor, editAt, pasteAt, pasteInto, shouldCap } from './keyboard-logic';
+import { isPersonalSender } from './sender';
 import { parseSms } from './parser';
 import { cardBills, cashFlow, dueRecurring, equalShares, friendBalances, groupDebts, memberNets, owedBack, pairDebts, percentShares, pocket, remainingOwed, reroutes, simplify, spendIn, youBalances } from './ledger';
 import { handleMcp, type McpData } from './mcp';
@@ -187,5 +188,10 @@ eq(at({ mode: 'phone' }, '9876', 0, '+').value, '+9876', 'a plus can go first in
 eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').value, 'abc', 'paste lands at the caret');
 eq(pasteAt({ mode: 'text' }, 'ac', 1, 'b').cursor, 2, 'the caret ends after what was pasted');
 eq(clampCursor('abc', 9), 3, 'the caret never passes the end');
+
+eq(isPersonalSender('VM-HDFCBK'), false, 'a bank short code is not a personal sender');
+eq(isPersonalSender('+919876543210'), true, 'a plus phone number is personal');
+eq(isPersonalSender('9876543210'), true, 'a plain phone number is personal');
+eq(isPersonalSender('+91 98765 43210'), true, 'spaces in a phone number still count as personal');
 
 console.log('selfcheck ok');

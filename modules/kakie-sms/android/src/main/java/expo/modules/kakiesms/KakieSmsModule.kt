@@ -29,6 +29,12 @@ import java.util.concurrent.TimeUnit
 
 private const val MAX_BODY = 1_000_000
 
+/** Digits only, 8 to 15 long, after spaces and one leading +. Banks use short codes like VM-HDFCBK. */
+fun isPersonalSender(address: String): Boolean {
+  val cleaned = address.filter { !it.isWhitespace() }.removePrefix("+")
+  return cleaned.length in 8..15 && cleaned.all { it.isDigit() }
+}
+
 private class McpReply(val status: Int, val body: String)
 
 class KakieSmsModule : Module() {
@@ -58,8 +64,10 @@ class KakieSmsModule : Module() {
       val out = ArrayList<Map<String, Any>>()
       cursor.use {
         while (it.moveToNext() && out.size < cap) {
+          val sender = it.getString(0) ?: ""
+          if (isPersonalSender(sender)) continue
           val row = HashMap<String, Any>()
-          row["sender"] = it.getString(0) ?: ""
+          row["sender"] = sender
           row["body"] = it.getString(1) ?: ""
           row["date"] = it.getLong(2)
           out.add(row)
