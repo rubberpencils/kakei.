@@ -9,6 +9,7 @@ import { ask, Avatar, Icon, Press, Word, usePalette } from '@/components/ui';
 import { serverName } from '@/lib/api';
 import { accountsFrom } from '@/lib/ledger';
 import { askNotify } from '@/lib/notify';
+import { shareCsv, sharePdf } from '@/lib/export';
 import { readDeviceSms } from '@/lib/sms';
 import { useStore } from '@/lib/store';
 import { font } from '@/lib/theme';
@@ -106,6 +107,17 @@ export default function Profile() {
           ))}
         </View>
       ) : null}
+
+      <Label>On this phone</Label>
+      <Press onPress={() => shareCsv(store.expenses).catch(() => store.flash('Could not share the CSV'))}>
+        <Row icon="file-delimited-outline" title="Export CSV" sub="Your expenses, on this phone" />
+      </Press>
+      <Press onPress={() => sharePdf(store.expenses).catch(() => store.flash('Could not share the PDF'))}>
+        <Row icon="file-pdf-box" title="Export PDF" sub="A one-page list of your expenses" />
+      </Press>
+      <Row icon="fingerprint" title="Lock with biometrics" sub={store.lock ? 'On. Kakei asks before it opens' : 'Off'}>
+        <Switch value={store.lock} onValueChange={store.setLock} trackColor={{ true: c.acc, false: c.bar }} />
+      </Row>
 
       <Label>Sync and sharing</Label>
       {store.signedIn ? (

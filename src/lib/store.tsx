@@ -30,6 +30,7 @@ type Local = {
   history: MonthSnapshot[];
   tagBudgets: Record<string, number>;
   alerted: string[];
+  lock: boolean;
   queue: Draft[];
   seen: string[];
   smsOn: boolean;
@@ -63,6 +64,7 @@ const FRESH: Local = {
   history: [],
   tagBudgets: {},
   alerted: [],
+  lock: false,
   queue: [],
   seen: [],
   smsOn: false,
@@ -300,6 +302,7 @@ type Store = Omit<Local, 'outbox' | 'token' | 'seen'> & {
   setDev: (patch: Partial<DevSettings>) => void;
   setBudget: (n: number) => void;
   setTagBudget: (tag: string, amount: number) => void;
+  setLock: (on: boolean) => void;
   markMonthly: (merchant: string) => void;
   addTag: (raw: string) => string | null;
   addExpense: (e: NewExpense) => string;
@@ -395,6 +398,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         history: x.history,
         tagBudgets: x.tagBudgets,
         alerted: x.alerted,
+        lock: x.lock,
         expenses: x.expenses.filter((e) => !e.groupId),
         you: x.you,
         local: true,
@@ -525,6 +529,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (n && n !== cur.current.you.name) commit([{ type: 'me.set', name: n }]);
       },
       setDev: (patch) => setS((x) => ({ ...x, dev: { ...x.dev, ...patch } })),
+      setLock: (lock) => setS((x) => ({ ...x, lock })),
       setBudget: (budget) => commit([{ type: 'prefs.set', prefs: { budget } }]),
       setTagBudget: (tag, amount) => {
         const tagBudgets = { ...cur.current.tagBudgets };

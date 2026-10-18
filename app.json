@@ -47,7 +47,11 @@
           }
         }
       ],
-      ["./plugins/with-gradle-name.js", "kakie"]
+      [
+        "./plugins/with-gradle-name.js",
+        "kakie"
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
