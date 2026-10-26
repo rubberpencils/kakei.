@@ -214,6 +214,7 @@ export function createApp(db: DatabaseSync, opts: {
     const pass = typeof body.password === 'string' ? body.password : '';
     if (pass.length < 6 || pass.length > 200) fail(400, 'Password needs at least 6 characters');
     if (one('select 1 from users where phone = ?', phone)) fail(409, 'That phone already has an account. Log in instead.');
+    if (!opts.everyonePro) takeCode(phone, 'signup', body.code ?? body.otp);
     const user = { id: newId(), name, phone };
     return tx(() => {
       run('insert into users (id, name, phone, pass, created) values (?, ?, ?, ?, ?)', user.id, name, phone, hashPass(pass), Date.now());

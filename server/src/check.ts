@@ -22,8 +22,12 @@ async function call(method: string, path: string, token: string | null, body?: u
   return { status: res.status, json: (await res.json()) as any };
 }
 
+const digits = (phone: string) => phone.replace(/\D/g, '');
+
 async function signup(name: string, phone: string, password: string) {
-  return call('POST', '/auth/signup', null, { name, phone, password });
+  const sent = await call('POST', '/auth/otp', null, { phone, purpose: 'signup' });
+  eq(sent.status, 200, 'signup code');
+  return call('POST', '/auth/signup', null, { name, phone, password, code: codes.get(digits(phone)) });
 }
 
 try {
@@ -35,7 +39,7 @@ try {
   const aid = a.json.you.id as string;
   const bid = b.json.you.id as string;
   eq((await signup('X', '9876543210', 'secret1')).status, 409, 'duplicate phone');
-  eq((await call('POST', '/auth/signup', null, { name: 'Z', phone: '9000000001', password: 'secret1' })).status, 200, 'signup needs no code');
+  eq((await call('POST', '/auth/signup', null, { name: 'Z', phone: '9000000001', password: 'secret1' })).status, 400, 'signup requires code');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'nope00' })).status, 401, 'bad password');
   eq((await call('POST', '/auth/login', null, { phone: '9876543210', password: 'secret1' })).status, 200, 'login');
 
