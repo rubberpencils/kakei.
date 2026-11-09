@@ -35,6 +35,37 @@ fun equalShares(amount: Double, ids: List<String>): Map<String, Double> {
     return shares
 }
 
+private const val DUST = 0.005
+
+/** One payer, or several. Each person's share minus what they paid is what they owe. */
+private fun expenseDebts(e: Expense): List<Debt> {
+    val shares = e.shares ?: return emptyList()
+    val paid = linkedMapOf<String, Double>()
+    val list = if (!e.payers.isNullOrEmpty()) e.payers else if (e.payerId != null) listOf(SharePayer(e.payerId, e.amount)) else emptyList()
+    for (p in list) paid[p.id] = round2((paid[p.id] ?: 0.0) + p.amount)
+    if (paid.isEmpty()) return emptyList()
+    val net = linkedMapOf<String, Double>()
+    fun touch(id: String, d: Double) { net[id] = round2((net[id] ?: 0.0) + d) }
+    for ((id, share) in shares) touch(id, -share)
+    for ((id, v) in paid) touch(id, v)
+    val cred = net.filter { it.value > DUST }.map { it.key to it.value }.sortedByDescending { it.second }.toMutableList()
+    val deb = net.filter { it.value < -DUST }.map { it.key to -it.value }.sortedByDescending { it.second }.toMutableList()
+    val out = mutableListOf<Debt>()
+    var i = 0
+    var j = 0
+    val c = cred.map { it.first to it.second }.toMutableList()
+    val d = deb.map { it.first to it.second }.toMutableList()
+    while (i < c.size && j < d.size) {
+        val amt = minOf(c[i].second, d[j].second)
+        if (amt > DUST) out += Debt(d[j].first, c[i].first, round2(amt))
+        c[i] = c[i].first to (c[i].second - amt)
+        d[j] = d[j].first to (d[j].second - amt)
+        if (c[i].second < DUST) i += 1
+        if (d[j].second < DUST) j += 1
+    }
+    return out
+}
+
 fun pairDebts(expenses: List<Expense>, settlements: List<Settlement>, groupId: String): List<Debt> {
     val map = linkedMapOf<String, Double>()
     fun add(from: String, to: String, amt: Double) {
@@ -43,8 +74,8 @@ fun pairDebts(expenses: List<Expense>, settlements: List<Settlement>, groupId: S
         map[k] = round2((map[k] ?: 0.0) + amt)
     }
     for (e in expenses) {
-        if (e.groupId != groupId || e.shares == null || e.payerId == null) continue
-        for ((id, share) in e.shares) if (id != e.payerId) add(id, e.payerId, share)
+        if (e.groupId != groupId || e.shares == null) continue
+        for (d in expenseDebts(e)) add(d.fromId, d.toId, d.amount)
     }
     for (s in settlements) {
         if (s.groupId != groupId) continue
@@ -424,6 +455,57 @@ fun accountsFrom(expenses: List<Expense>): List<Account> {
         map[key] = row.copy(count = row.count + 1, credit = row.credit || e.rail == Rail.CREDIT)
     }
     return map.values.sortedByDescending { it.count }
+}
+
+data class BalanceLine(val groupId: String, val amount: Double)
+data class BalanceRow(val id: String, var amount: Double, val lines: MutableList<BalanceLine>)
+data class YouBalances(val owed: List<BalanceRow>, val owe: List<BalanceRow>, val owedTotal: Double, val oweTotal: Double)
+
+fun youBalances(expenses: List<Expense>, settlements: List<Settlement>, groups: List<Group>, youId: String): YouBalances {
+    val owed = linkedMapOf<String, BalanceRow>()
+    val owe = linkedMapOf<String, BalanceRow>()
+    fun bump(map: MutableMap<String, BalanceRow>, id: String, groupId: String, amount: Double) {
+        val row = map.getOrPut(id) { BalanceRow(id, 0.0, mutableListOf()) }
+        row.amount = round2(row.amount + amount)
+        row.lines += BalanceLine(groupId, round2(amount))
+    }
+    for (g in groups) {
+        for (d in groupDebts(expenses, settlements, g)) {
+            if (d.toId == youId) bump(owed, d.fromId, g.id, d.amount)
+            else if (d.fromId == youId) bump(owe, d.toId, g.id, d.amount)
+        }
+    }
+    fun list(m: Map<String, BalanceRow>) = m.values.map { it.copy(lines = it.lines.sortedByDescending { l -> l.amount }.toMutableList()) }.sortedByDescending { it.amount }
+    val o = list(owed)
+    val w = list(owe)
+    return YouBalances(o, w, round2(o.sumOf { it.amount }), round2(w.sumOf { it.amount }))
+}
+
+data class CardBill(val key: String, val bank: String?, val account: String?, var due: Double, val charges: MutableList<Expense>, var lastPaid: String?)
+
+fun cardBills(expenses: List<Expense>, youId: String): List<CardBill> {
+    val cards = linkedMapOf<String, CardBill>()
+    fun card(e: Expense): CardBill {
+        val key = if (e.account != null) "${e.bank ?: ""}|${e.account}" else "card"
+        return cards.getOrPut(key) { CardBill(key, if (e.account != null) e.bank else null, e.account, 0.0, mutableListOf(), null) }
+    }
+    val sorted = expenses.filter { !it.income }.sortedBy { it.at }
+    for (e in sorted) {
+        if (e.transfer) {
+            val target = (e.account?.let { cards["${e.bank ?: ""}|$it"] }) ?: cards.values.maxByOrNull { it.due }
+            if (target == null) continue
+            target.due = round2(maxOf(0.0, target.due - e.amount))
+            target.lastPaid = e.at
+            if (target.due < DUST) target.charges.clear()
+            continue
+        }
+        if (e.rail != Rail.CREDIT) continue
+        if (e.groupId != null && e.payerId != null && e.payerId != youId) continue
+        val c = card(e)
+        c.due = round2(c.due + e.amount)
+        c.charges.add(0, e)
+    }
+    return cards.values.filter { it.due >= DUST }.sortedByDescending { it.due }
 }
 
 fun personName(people: List<Person>, you: Person, id: String): String {

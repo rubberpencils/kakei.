@@ -1,5 +1,6 @@
 package app.kakie.lib
 
+import app.kakie.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
@@ -16,15 +17,20 @@ fun cleanBase(raw: String): String {
     return if (Regex("^https?://").containsMatchIn(t)) t else "http://$t"
 }
 
-suspend fun call(base: String, token: String?, method: String, path: String, body: JsonElement? = null): JsonElement =
+fun isOfficial(base: String) = cleanBase(base).equals(cleanBase(BuildConfig.API_URL), ignoreCase = true)
+
+/** The hosted server is "Official servers". A typed address is shown without the scheme. */
+fun serverName(base: String) = if (isOfficial(base)) "Official servers" else base.replace(Regex("^https?://"), "")
+
+suspend fun call(base: String, token: String?, method: String, path: String, body: JsonElement? = null, timeout: Int = 12_000): JsonElement =
     withContext(Dispatchers.IO) {
         val code: Int
         val text: String
         try {
             val conn = URL(base + path).openConnection() as HttpURLConnection
             conn.requestMethod = method
-            conn.connectTimeout = 12_000
-            conn.readTimeout = 12_000
+            conn.connectTimeout = timeout
+            conn.readTimeout = timeout
             conn.setRequestProperty("Content-Type", "application/json")
             if (token != null) conn.setRequestProperty("Authorization", "Bearer $token")
             // POST with no body still needs doOutput or Android turns it into GET.

@@ -34,7 +34,9 @@ import app.kakie.lib.personName
 import app.kakie.lib.youNet
 import app.kakie.ui.Avatar
 import app.kakie.ui.Fonts
+import app.kakie.ui.ExpenseR
 import app.kakie.ui.GroupR
+import app.kakie.ui.QuickSplitR
 import app.kakie.ui.Icon
 import app.kakie.ui.Join
 import app.kakie.ui.LocalInsets
@@ -90,19 +92,37 @@ fun GroupsScreen() {
         }
 
         Box(Modifier.padding(top = 24.dp)) {
-            Segmented(listOf("groups" to "Groups", "friends" to "Friends"), view) { view = it }
+            Segmented(listOf("groups" to "Groups", "splits" to "Splits", "friends" to "Friends"), view) { view = it }
         }
 
         key(view) {
             Column(Modifier.padding(top = 8.dp).entering(fadeInE(180))) {
-                if (view == "groups") {
-                    s.groups.forEach { g ->
+                if (view == "splits") {
+                    Row(
+                        Modifier.fillMaxWidth().press { nav.push(QuickSplitR()) }.padding(vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(46.dp).border(1.dp, c.line, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon("plus", 22) }
+                        Column(Modifier.weight(1f)) {
+                            Txt("New quick split", Fonts.semi, 16, c.fg)
+                            Txt("Or open any expense and tap Split this", Fonts.body, 12.5, c.mut, Modifier.padding(top = 2.dp))
+                        }
+                    }
+                }
+                if (view != "friends") {
+                    val rows = s.groups.filter { if (view == "splits") it.kind == "split" else it.kind != "split" }
+                    rows.forEach { g ->
                         val debts = groupDebts(s.expenses, s.settlements, g)
                         val n = youNet(debts, you)
                         val mine = debts.filter { it.fromId == you || it.toId == you }
                         val color = if (n.net > 0) c.pos else if (n.net < 0) c.neg else c.mut
+                        val open = {
+                            val bills = s.expenses.filter { it.groupId == g.id }
+                            if (g.kind == "split" && bills.size == 1) nav.push(ExpenseR(bills[0].id)) else nav.push(GroupR(g.id))
+                        }
                         Row(
-                            Modifier.fillMaxWidth().press { nav.push(GroupR(g.id)) }.padding(vertical = 14.dp),
+                            Modifier.fillMaxWidth().press { open() }.padding(vertical = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
                             Box(Modifier.size(46.dp).background(c.sub, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(g.icon, 22) }

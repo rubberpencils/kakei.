@@ -32,12 +32,14 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.kakie.lib.SmsError
+import app.kakie.lib.serverName
 import app.kakie.lib.SyncState
 import app.kakie.lib.accountsFrom
 import app.kakie.lib.enIn
 import app.kakie.lib.jsNum
 import app.kakie.lib.maskVpa
 import app.kakie.ui.Ask
+import app.kakie.ui.CardBill
 import app.kakie.ui.Avatar
 import app.kakie.ui.Fonts
 import app.kakie.ui.Icon
@@ -208,15 +210,21 @@ fun ProfileScreen() {
         }
         Txt("One number for the month. Spend under it is savings.", Fonts.body, 13, c.mut)
 
+        Label("On this phone")
+        Box(Modifier.press { nav.push(CardBill) }) { ProfileRow("credit-card-outline", "Credit card bill", "What each card still owes") }
+        ProfileRow("fingerprint", "Lock with biometrics", if (s.lock) "On. kakie. asks before it opens" else "Off") {
+            NativeSwitch(s.lock, store::setLock)
+        }
+
         Label("Server")
-        ProfileRow("server-network", s.base.replace(Regex("^https?://"), ""), syncLine) {
+        ProfileRow("server-network", serverName(s.base), syncLine) {
             Box(
                 Modifier.press { store.syncNow() }.height(34.dp).border(1.dp, c.line, RoundedCornerShape(17.dp)).padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) { Txt("Sync now", Fonts.medium, 12.5, c.fg) }
         }
         Txt(
-            "Groups, expenses and settlements live on this server so everyone in a group sees the same balances. Changes made offline are sent when you reconnect.",
+            "Only groups, their expenses and settlements leave this phone. Your own spends, budget and tags stay here.",
             Fonts.body, 12.5, c.mut, Modifier.padding(top = 10.dp), lineHeight = 18,
         )
 

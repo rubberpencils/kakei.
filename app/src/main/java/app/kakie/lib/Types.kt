@@ -34,6 +34,8 @@ data class Group(
     val owner: Boolean? = null,
     val sample: Boolean? = null,
     val simplify: Boolean? = null,
+    /** "split" is one bill. It shows under Splits, not Groups. */
+    val kind: String? = null,
 )
 
 @Serializable
@@ -57,7 +59,15 @@ data class Expense(
     val bank: String? = null,
     val note: String? = null,
     val sample: Boolean = false,
+    val payers: List<SharePayer>? = null,
+    val items: List<LineItem>? = null,
 )
+
+@Serializable
+data class SharePayer(val id: String, val amount: Double)
+
+@Serializable
+data class LineItem(val name: String, val amount: Double, val memberIds: List<String> = emptyList())
 
 @Serializable
 data class Settlement(
@@ -67,8 +77,8 @@ data class Settlement(
     val toId: String,
     val amount: Double,
     val at: String,
-    /** "upi" or "cash". */
-    val method: String,
+    /** Older clients stored "upi" or "cash". The server does not. */
+    val method: String = "",
     val sample: Boolean = false,
 )
 
@@ -101,13 +111,19 @@ data class GroupPatch(
     val note: String,
     val sample: Boolean? = null,
     val simplify: Boolean? = null,
+    val kind: String? = null,
 )
 
 @Serializable
 data class NewPerson(val id: String, val name: String)
 
 @Serializable
-data class Prefs(val budget: Double? = null, val tags: List<String>? = null, val history: List<MonthSnapshot>? = null)
+data class Prefs(
+    val budget: Double? = null,
+    val tags: List<String>? = null,
+    val history: List<MonthSnapshot>? = null,
+    val tagBudgets: Map<String, Double>? = null,
+)
 
 @Serializable
 sealed interface Op
@@ -121,8 +137,11 @@ sealed interface Op
 @Serializable @SerialName("settlement.delete") data class SettlementDelete(val id: String) : Op
 @Serializable @SerialName("prefs.set") data class PrefsSet(val prefs: Prefs) : Op
 
-/** Null fields are left alone by the server; an empty [vpa] removes the UPI ID. */
+/** Null fields are left alone. The server only stores the name. */
 @Serializable @SerialName("me.set") data class MeSet(val name: String? = null, val vpa: String? = null) : Op
+
+/** Asks the server to forget personal spends older apps uploaded. */
+@Serializable @SerialName("personal.purge") data object PersonalPurge : Op
 
 @Serializable
 data class Queued(val qid: String, val op: Op)
@@ -134,13 +153,21 @@ data class RemoteYou(val id: String, val name: String, val phone: String, val vp
 data class RemotePerson(val id: String, val name: String, val claimed: Boolean = false, val vpa: String? = null)
 
 @Serializable
+data class RemoteMcp(val created: Boolean = false, val enabled: Boolean = false, val publicId: String? = null)
+
+@Serializable
+data class RemoteSettings(val remoteMcp: RemoteMcp? = null, val ask: Boolean = false)
+
+@Serializable
 data class Remote(
     val you: RemoteYou,
+    val pro: Boolean = false,
     val people: List<RemotePerson>,
     val groups: List<Group>,
     val expenses: List<Expense>,
     val settlements: List<Settlement>,
-    val prefs: Prefs,
+    val prefs: Prefs = Prefs(),
+    val settings: RemoteSettings? = null,
 )
 
 @Serializable

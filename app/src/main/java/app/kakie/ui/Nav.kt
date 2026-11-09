@@ -1,6 +1,10 @@
 package app.kakie.ui
 
+import android.content.Context
+import android.hardware.biometrics.BiometricPrompt
 import android.net.Uri
+import android.os.Build
+import android.os.CancellationSignal
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
@@ -43,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.navigation.NavBackStackEntry
@@ -54,6 +59,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import app.kakie.lib.Store
+import app.kakie.ui.screens.BalancesScreen
+import app.kakie.ui.screens.CardBillScreen
 import app.kakie.ui.screens.AddScreen
 import app.kakie.ui.screens.ExpenseScreen
 import app.kakie.ui.screens.GroupScreen
@@ -67,6 +74,7 @@ import app.kakie.ui.screens.OnboardingScreen
 import app.kakie.ui.screens.PersonScreen
 import app.kakie.ui.screens.PersonalScreen
 import app.kakie.ui.screens.ProfileScreen
+import app.kakie.ui.screens.QuickSplitScreen
 import app.kakie.ui.screens.ReviewScreen
 import app.kakie.ui.screens.SearchScreen
 import app.kakie.ui.screens.SettleScreen
@@ -88,6 +96,9 @@ import kotlinx.serialization.Serializable
 @Serializable data class PersonR(val id: String)
 @Serializable data class GroupSettings(val id: String)
 @Serializable data object Search
+@Serializable data class BalancesR(val side: String = "owed")
+@Serializable data object CardBill
+@Serializable data class QuickSplitR(val draftId: String? = null, val expenseId: String? = null, val tag: String? = null)
 
 enum class Tab(val label: String, val icon: String, val on: String) {
     HOME("Home", "home-outline", "home"),
@@ -181,6 +192,9 @@ fun Root(store: Store) {
     val navBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val ime = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
     var splash by remember { mutableStateOf(true) }
+    var unlocked by remember { mutableStateOf(!store.s.lock) }
+    val context = LocalContext.current
+    if (!store.s.lock && !unlocked) unlocked = true
     CompositionLocalProvider(LocalStore provides store, LocalInsets provides Insets(top, max(0.dp, navBar - ime))) {
         Box(Modifier.fillMaxSize().background(c.bg)) {
             // The window stops at the keyboard, like adjustResize.
@@ -189,6 +203,14 @@ fun Root(store: Store) {
                 Toast()
             }
             ConfirmHost()
+            if (store.s.lock && !unlocked && !splash) {
+                Column(Modifier.fillMaxSize().background(c.bg), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Wordmark(32)
+                    Box(Modifier.padding(top = 16.dp, start = 24.dp, end = 24.dp).fillMaxWidth()) {
+                        Button("Unlock", { unlock(context) { unlocked = true } })
+                    }
+                }
+            }
             if (splash) Splash(store.ready) { splash = false }
         }
     }
@@ -199,8 +221,8 @@ fun Root(store: Store) {
 private fun AppNav(store: Store, reduce: Boolean) {
     val controller = rememberNavController()
     val nav = remember(controller) { Nav(controller) }
-    val signedIn = store.signedIn
-    val start = remember { if (signedIn) TabsRoute else Onboarding }
+    val entered = store.entered
+    val start = remember { if (entered) TabsRoute else Onboarding }
     CompositionLocalProvider(LocalNav provides nav) {
         NavHost(
             controller,
@@ -225,20 +247,23 @@ private fun AppNav(store: Store, reduce: Boolean) {
             composable<PersonR> { PersonScreen(it.toRoute<PersonR>().id) }
             composable<GroupSettings> { GroupSettingsScreen(it.toRoute<GroupSettings>().id) }
             composable<Search> { SearchScreen() }
+            composable<BalancesR> { BalancesScreen(it.toRoute()) }
+            composable<CardBill> { CardBillScreen() }
+            composable<QuickSplitR> { QuickSplitScreen(it.toRoute()) }
         }
     }
 
-    // Stack.Protected: signing in or out swaps the whole stack.
-    LaunchedEffect(signedIn) {
+    // Stack.Protected: signing in, skipping the account, or signing out swaps the whole stack.
+    LaunchedEffect(entered) {
         val onTabs = controller.currentDestination?.hasRoute(Onboarding::class) != true
-        if (signedIn == onTabs) return@LaunchedEffect
+        if (entered == onTabs) return@LaunchedEffect
         nav.tab = Tab.HOME
-        controller.navigate(if (signedIn) TabsRoute else Onboarding) { popUpTo(controller.graph.id) { inclusive = true } }
+        controller.navigate(if (entered) TabsRoute else Onboarding) { popUpTo(controller.graph.id) { inclusive = true } }
     }
 
     val link = Links.pending
-    LaunchedEffect(link, signedIn) {
-        if (link == null || !signedIn) return@LaunchedEffect
+    LaunchedEffect(link, entered) {
+        if (link == null || !entered) return@LaunchedEffect
         Links.pending = null
         openLink(link, store, nav)
     }
@@ -251,6 +276,17 @@ private fun query(uri: Uri): Map<String, String> =
         val v = it.substringAfter("=", "")
         Uri.decode(k.replace('+', ' ')) to Uri.decode(v.replace('+', ' '))
     }
+
+private fun unlock(context: Context, onOk: () -> Unit) {
+    if (Build.VERSION.SDK_INT < 28) {
+        onOk()
+        return
+    }
+    val prompt = BiometricPrompt.Builder(context).setTitle("Unlock kakie.").setNegativeButton("Cancel", context.mainExecutor) { _, _ -> }.build()
+    prompt.authenticate(CancellationSignal(), context.mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) = onOk()
+    })
+}
 
 private fun openLink(uri: Uri, store: Store, nav: Nav) {
     val q = query(uri)

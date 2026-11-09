@@ -43,6 +43,7 @@ import app.kakie.lib.spendIn
 import app.kakie.lib.youNet
 import app.kakie.lib.SyncState
 import app.kakie.ui.Add
+import app.kakie.ui.BalancesR
 import app.kakie.ui.Avatar
 import app.kakie.ui.Fonts
 import app.kakie.ui.GroupR
@@ -227,8 +228,8 @@ fun HomeScreen() {
                 }
 
                 Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    NetCard("Owed to you", owed, if (owed > 0.5) c.pos else c.fg, "$owedPeople ${if (owedPeople == 1) "person" else "people"}") { nav.tab = Tab.GROUPS }
-                    NetCard("You owe", owe, if (owe > 0.5) c.neg else c.fg, "$oweGroups ${if (oweGroups == 1) "group" else "groups"}") { nav.tab = Tab.GROUPS }
+                    NetCard("Owed to you", owed, if (owed > 0.5) c.pos else c.fg, "$owedPeople ${if (owedPeople == 1) "person" else "people"}") { nav.push(BalancesR("owed")) }
+                    NetCard("You owe", owe, if (owe > 0.5) c.neg else c.fg, "$oweGroups ${if (oweGroups == 1) "group" else "groups"}") { nav.push(BalancesR("owe")) }
                 }
             }
 

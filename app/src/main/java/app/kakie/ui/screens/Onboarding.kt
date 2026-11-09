@@ -291,6 +291,7 @@ private fun ColumnScope.Account(mode: String, setMode: (String) -> Unit, back: (
                 error = null
                 setMode(if (signup) "login" else "signup")
             }
+            Ghost("Skip the account, keep it on this phone") { store.startLocal(name.trim().ifEmpty { "You" }) }
         }
         }
     }

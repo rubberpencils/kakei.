@@ -51,6 +51,13 @@ data class Local(
     val tags: List<String> = TAGS,
     val budget: Double = 0.0,
     val history: List<MonthSnapshot> = emptyList(),
+    val tagBudgets: Map<String, Double> = emptyMap(),
+    val lock: Boolean = false,
+    val local: Boolean = false,
+    val connecting: Boolean = false,
+    val cleaned: Boolean = false,
+    val pro: Boolean = false,
+    val askOk: Boolean = false,
     val queue: List<Draft> = emptyList(),
     val seen: List<String> = emptyList(),
     val smsOn: Boolean = false,
@@ -76,10 +83,10 @@ private fun applyOp(s: Local, op: Op): Local = when (op) {
         s.copy(
             groups = if (found) {
                 s.groups.map {
-                    if (it.id == p.id) it.copy(name = p.name, icon = p.icon, note = p.note, sample = p.sample ?: it.sample, simplify = p.simplify ?: it.simplify) else it
+                    if (it.id == p.id) it.copy(name = p.name, icon = p.icon, note = p.note, sample = p.sample ?: it.sample, simplify = p.simplify ?: it.simplify, kind = p.kind ?: it.kind) else it
                 }
             } else {
-                listOf(Group(p.id, p.name, p.icon, emptyList(), p.note, owner = true, sample = p.sample, simplify = p.simplify)) + s.groups
+                listOf(Group(p.id, p.name, p.icon, emptyList(), p.note, owner = true, sample = p.sample, simplify = p.simplify, kind = p.kind)) + s.groups
             },
         )
     }
@@ -104,29 +111,84 @@ private fun applyOp(s: Local, op: Op): Local = when (op) {
         },
     )
     is SettlementDelete -> s.copy(settlements = s.settlements.filter { it.id != op.id })
-    is PrefsSet -> s.copy(budget = op.prefs.budget ?: s.budget, tags = op.prefs.tags ?: s.tags, history = op.prefs.history ?: s.history)
+    is PrefsSet -> s.copy(
+        budget = op.prefs.budget ?: s.budget,
+        tags = op.prefs.tags ?: s.tags,
+        history = op.prefs.history ?: s.history,
+        tagBudgets = op.prefs.tagBudgets ?: s.tagBudgets,
+    )
+    is PersonalPurge -> s
     is MeSet -> s.copy(
         you = person(s.you.id, op.name ?: s.you.name, s.you.claimed, if (op.vpa == null) s.you.vpa else op.vpa.ifEmpty { null }),
     )
 }
 
+/** Personal spends and prefs stay on the phone. A delete is shared only when the expense was in a group. */
+private fun isShared(before: Local, op: Op) = when (op) {
+    is ExpenseUpsert -> op.expense.groupId != null
+    is ExpenseDelete -> before.expenses.find { it.id == op.id }?.groupId != null
+    is PrefsSet, PersonalPurge -> false
+    else -> true
+}
+
+/** Which account paid stays on the phone. The server copy has neither field. */
+private fun scrub(op: Op) = if (op is ExpenseUpsert) op.copy(expense = op.expense.copy(account = null, bank = null)) else op
+
+private fun remapYou(s: Local, to: String): Local {
+    val from = s.you.id
+    if (from == to) return s
+    fun swap(id: String) = if (id == from) to else id
+    return s.copy(
+        expenses = s.expenses.map { e ->
+            e.copy(
+                payerId = e.payerId?.let(::swap),
+                shares = e.shares?.mapKeys { swap(it.key) },
+                payers = e.payers?.map { it.copy(id = swap(it.id)) },
+            )
+        },
+        settlements = s.settlements.map { it.copy(fromId = swap(it.fromId), toId = swap(it.toId)) },
+    )
+}
+
+private fun snapshotOps(s: Local): List<Op> {
+    val ops = mutableListOf<Op>()
+    for (g in s.groups) {
+        ops += GroupUpsert(GroupPatch(g.id, g.name, g.icon, g.note, g.sample, g.simplify != false, g.kind ?: "group"))
+        for (pid in g.memberIds) {
+            val p = s.people.find { it.id == pid } ?: continue
+            ops += PersonAdd(g.id, NewPerson(p.id, p.name))
+        }
+    }
+    for (e in s.expenses) if (e.groupId != null) ops += ExpenseUpsert(e)
+    for (st in s.settlements) ops += SettlementUpsert(st)
+    return ops
+}
+
 private fun enqueue(s: Local, ops: List<Op>): Local {
     var next = s
     for (op in ops) next = applyOp(next, op)
-    return next.copy(outbox = next.outbox + ops.map { Queued(uid(), it) })
+    if (next.token == null) return next
+    val shared = ops.filter { isShared(s, it) }
+    if (shared.isEmpty()) return next
+    return next.copy(outbox = next.outbox + shared.map { Queued(uid(), it) })
 }
 
 private fun rebase(s: Local, r: Remote): Local {
+    val mine = s.expenses.associateBy { it.id }
+    // The server does not keep which account paid, so put back what this phone already knows.
+    val shared = r.expenses.filter { it.groupId != null }.map { e ->
+        val local = mine[e.id]
+        if (local?.account != null) e.copy(account = local.account, bank = local.bank) else e
+    }
     var next = s.copy(
         you = person(r.you.id, r.you.name, null, r.you.vpa),
         phone = r.you.phone,
         people = r.people.map { person(it.id, it.name, it.claimed, it.vpa) },
         groups = r.groups,
-        expenses = r.expenses,
+        expenses = shared + s.expenses.filter { it.groupId == null },
         settlements = r.settlements,
-        tags = r.prefs.tags ?: s.tags,
-        budget = r.prefs.budget ?: 0.0,
-        history = r.prefs.history ?: emptyList(),
+        pro = r.pro,
+        askOk = r.settings?.ask == true || s.askOk,
         syncedAt = System.currentTimeMillis(),
     )
     for (q in s.outbox) next = applyOp(next, q.op)
@@ -169,6 +231,8 @@ class Store(filesDir: File, private val device: Device) {
         private set
 
     val signedIn get() = s.token != null
+    /** Past onboarding, with an account or with the ledger kept on this phone. */
+    val entered get() = s.token != null || (s.local && !s.connecting)
     val pending get() = s.outbox.size
     val hasSample get() = s.groups.any { it.sample == true } || s.expenses.any { it.sample } || s.queue.any { it.sample }
 
@@ -207,9 +271,14 @@ class Store(filesDir: File, private val device: Device) {
                 if (token == null) return@collectLatest
                 syncNow()
                 scan()
-                // ponytail: 20s polling, fine for small groups. Switch to server-sent events if group edits must feel instant.
                 while (true) {
-                    delay(20_000)
+                    if (!active) {
+                        delay(1_000)
+                        continue
+                    }
+                    val after = s.syncedAt ?: 0L
+                    val woke = runCatching { call(s.base, token, "GET", "/sync/wait?after=$after", timeout = 30_000) }.isSuccess
+                    if (!woke) delay(5_000)
                     if (active) syncNow()
                 }
             }
@@ -251,7 +320,22 @@ class Store(filesDir: File, private val device: Device) {
     }
 
     private fun signOutLocal() {
-        s = Local(base = s.base)
+        val x = s
+        // Shared rows go. Spends, budget and tags on this phone stay.
+        s = Local(
+            base = x.base,
+            queue = x.queue,
+            seen = x.seen,
+            smsOn = x.smsOn,
+            tags = x.tags,
+            budget = x.budget,
+            history = x.history,
+            tagBudgets = x.tagBudgets,
+            lock = x.lock,
+            expenses = x.expenses.filter { it.groupId == null },
+            you = x.you,
+            local = true,
+        )
     }
 
     fun syncNow() {
@@ -268,14 +352,19 @@ class Store(filesDir: File, private val device: Device) {
         busy = true
         sync = SyncState.SYNCING
         try {
-            val sent = s.outbox
-            if (sent.isNotEmpty()) {
-                val body = JsonObject(mapOf("ops" to JsonArray(sent.map { json.encodeToJsonElement(Op.serializer(), it.op) })))
+            val queued = s.outbox
+            for (chunk in queued.chunked(400)) {
+                val body = JsonObject(mapOf("ops" to JsonArray(chunk.map { json.encodeToJsonElement(Op.serializer(), scrub(it.op)) })))
                 val res = call(base, token, "POST", "/ops", body)
                 val bad = res.jsonObject["results"]?.jsonArray?.map { it.jsonObject }?.firstOrNull { it["ok"]?.jsonPrimitive?.booleanOrNull != true }
                 bad?.get("error")?.jsonPrimitive?.contentOrNull?.let(::flash)
-                val done = sent.map { it.qid }.toSet()
+                val done = chunk.map { it.qid }.toSet()
                 s = s.copy(outbox = s.outbox.filter { it.qid !in done })
+            }
+            if (!s.cleaned && s.expenses.any { it.groupId == null }) {
+                val purge = JsonObject(mapOf("ops" to JsonArray(listOf(json.encodeToJsonElement(Op.serializer(), PersonalPurge)))))
+                call(base, token, "POST", "/ops", purge)
+                s = s.copy(cleaned = true)
             }
             val remote = json.decodeFromJsonElement<Remote>(call(base, token, "GET", "/sync"))
             if (s.token == token) s = rebase(s, remote)
@@ -304,8 +393,17 @@ class Store(filesDir: File, private val device: Device) {
             val token = res.getValue("token").jsonPrimitive.content
             val you = json.decodeFromJsonElement<RemoteYou>(res.getValue("you"))
             val x = s
-            val keep = if (x.you.id == you.id) x else Local(queue = x.queue, seen = x.seen, smsOn = x.smsOn)
-            s = keep.copy(base = base, token = token, you = person(you.id, you.name), phone = you.phone)
+            if (x.local) {
+                val mine = remapYou(x, you.id)
+                val connected = mine.copy(
+                    base = base, token = token, you = person(you.id, you.name), phone = you.phone,
+                    local = false, connecting = false, outbox = emptyList(),
+                )
+                s = enqueue(connected, snapshotOps(connected))
+            } else {
+                val keep = if (x.you.id == you.id) x else Local(queue = x.queue, seen = x.seen, smsOn = x.smsOn)
+                s = keep.copy(base = base, token = token, you = person(you.id, you.name), phone = you.phone)
+            }
             null
         } catch (e: CancellationException) {
             throw e
@@ -362,6 +460,42 @@ class Store(filesDir: File, private val device: Device) {
     }
 
     fun setBudget(n: Double) = commit(PrefsSet(Prefs(budget = n)))
+
+    fun setTagBudget(tag: String, amount: Double) {
+        val next = s.tagBudgets.toMutableMap()
+        if (amount > 0) next[tag] = amount else next.remove(tag)
+        commit(PrefsSet(Prefs(tagBudgets = next)))
+    }
+
+    fun setLock(on: Boolean) {
+        s = s.copy(lock = on)
+    }
+
+    /** Ledger stays on this phone. No account, no upload. */
+    fun startLocal(name: String) {
+        if (s.local) {
+            s = s.copy(connecting = false)
+            return
+        }
+        s = Local(
+            base = s.base,
+            queue = s.queue,
+            seen = s.seen,
+            smsOn = s.smsOn,
+            you = person(uid(), name.trim().ifEmpty { "You" }),
+            local = true,
+        )
+    }
+
+    fun payCardBill(bank: String?, account: String?, amount: Double) {
+        if (amount <= 0) return
+        val title = "${bank ?: "Credit"}${if (account != null) " ••$account" else ""} card bill"
+        commit(ExpenseUpsert(Expense(
+            id = uid(), merchant = title, amount = amount, at = nowIso(), tag = null, rail = Rail.UPI,
+            transfer = true, account = account, bank = bank,
+        )))
+        flash("Card payment saved")
+    }
 
     fun addTag(raw: String): String? {
         val tag = slugTag(raw)
@@ -437,7 +571,7 @@ class Store(filesDir: File, private val device: Device) {
 
     fun createGroup(name: String, memberNames: List<String>, icon: String = "account-group"): String {
         val id = uid()
-        val ops = mutableListOf<Op>(GroupUpsert(GroupPatch(id, name.trim().ifEmpty { "Group" }, icon, "")))
+        val ops = mutableListOf<Op>(GroupUpsert(GroupPatch(id, name.trim().ifEmpty { "Group" }, icon, "", kind = "group")))
         for (raw in memberNames) {
             val n = raw.trim()
             if (n.isNotEmpty()) ops += PersonAdd(id, NewPerson(uid(), n))
@@ -450,7 +584,70 @@ class Store(filesDir: File, private val device: Device) {
         val g = s.groups.find { it.id == id } ?: return
         val nextName = (name ?: g.name).trim().ifEmpty { g.name }
         val nextSimplify = simplify ?: g.simplify
-        commit(GroupUpsert(GroupPatch(id, nextName, icon ?: g.icon, g.note, simplify = nextSimplify != false)))
+        commit(GroupUpsert(GroupPatch(id, nextName, icon ?: g.icon, g.note, simplify = nextSimplify != false, kind = g.kind ?: "group")))
+    }
+
+    fun groupFromExpense(expenseId: String, name: String, memberNames: List<String>, icon: String = "account-group"): String? {
+        val e = s.expenses.find { it.id == expenseId } ?: return null
+        val id = uid()
+        val ids = mutableListOf<String>()
+        val ops = mutableListOf<Op>(GroupUpsert(GroupPatch(id, name.trim().ifEmpty { e.merchant }, icon, "", kind = "group")))
+        for (raw in memberNames) {
+            val n = raw.trim()
+            if (n.isEmpty()) continue
+            val pid = uid()
+            ids += pid
+            ops += PersonAdd(id, NewPerson(pid, n))
+        }
+        ops += ExpenseUpsert(e.copy(groupId = id, payerId = s.you.id, shares = equalShares(e.amount, listOf(s.you.id) + ids), reflect = true))
+        commit(ops)
+        return id
+    }
+
+    fun quickSplit(
+        expenseId: String?,
+        draftId: String?,
+        amount: Double?,
+        name: String,
+        people: List<Person>,
+        payerId: String,
+        shares: Map<String, Double>,
+        tag: String?,
+    ): String {
+        var base: Expense? = null
+        var dropDraft: String? = null
+        if (expenseId != null) base = s.expenses.find { it.id == expenseId }
+        else if (draftId != null) {
+            val d = s.queue.find { it.id == draftId }
+            if (d != null) {
+                base = Expense(
+                    id = uid(), merchant = d.merchant, amount = d.amount, at = d.at, tag = tag, rail = d.rail,
+                    income = d.income, transfer = d.transfer, bank = d.bank, account = d.account, sample = d.sample,
+                )
+                dropDraft = d.id
+            }
+        }
+        if (expenseId == null && draftId == null && amount != null && amount > 0) {
+            base = Expense(
+                id = uid(), merchant = name.trim().ifEmpty { "Split" }, amount = amount, at = nowIso(), tag = tag, rail = Rail.UPI,
+            )
+        }
+        val bill = base ?: return ""
+        val groupId = uid()
+        val ops = mutableListOf<Op>(GroupUpsert(GroupPatch(groupId, name.trim().ifEmpty { bill.merchant }, "call-split", "", kind = "split")))
+        for (p in people) if (p.id != s.you.id) ops += PersonAdd(groupId, NewPerson(p.id, p.name))
+        ops += ExpenseUpsert(bill.copy(groupId = groupId, payerId = payerId, shares = shares, reflect = true))
+        val nextTag = tag ?: bill.tag
+        if (nextTag != null && nextTag !in s.tags) ops += PrefsSet(Prefs(tags = s.tags + nextTag))
+        val next = enqueue(s, ops)
+        s = next.copy(queue = if (dropDraft != null) next.queue.filter { it.id != dropDraft } else next.queue)
+        return groupId
+    }
+
+    fun unsplit(groupId: String) {
+        val ops = s.expenses.filter { it.groupId == groupId && it.payerId == s.you.id }
+            .map { ExpenseUpsert(it.copy(groupId = null, payerId = null, shares = null, reflect = true)) } + GroupDelete(groupId)
+        commit(ops)
     }
 
     fun addMember(groupId: String, name: String) {
