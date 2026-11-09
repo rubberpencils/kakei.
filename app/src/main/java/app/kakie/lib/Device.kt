@@ -24,12 +24,14 @@ enum class SmsError { DENIED, FAILED }
 class SmsResult(val rows: List<InboxRow>, val error: SmsError?)
 
 /** SMS inbox and UPI apps; the activity attaches its result launchers on create. */
-class Device(private val context: Context) {
+class Device(val appContext: Context) {
     private var activity: ComponentActivity? = null
     private var permissionLauncher: ActivityResultLauncher<String>? = null
     private var payLauncher: ActivityResultLauncher<Intent>? = null
     private var permissionWait: CancellableContinuation<Boolean>? = null
     private var payWait: CancellableContinuation<String>? = null
+
+    fun activity() = activity
 
     fun attach(activity: ComponentActivity) {
         this.activity = activity
@@ -43,7 +45,7 @@ class Device(private val context: Context) {
         }
     }
 
-    private fun smsGranted() = context.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+    private fun smsGranted() = appContext.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
 
     // Same flow as PermissionsAndroid.request: the rationale shows only after a previous denial, and either button goes on to ask.
     private suspend fun requestSms(): Boolean {
@@ -76,7 +78,7 @@ class Device(private val context: Context) {
     private suspend fun readInbox(limit: Int): List<InboxRow> = withContext(Dispatchers.IO) {
         val cap = limit.coerceIn(1, 200)
         val out = ArrayList<InboxRow>()
-        context.contentResolver.query(
+        appContext.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
             arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
             null,

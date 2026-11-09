@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,7 +40,10 @@ import app.kakie.lib.enIn
 import app.kakie.lib.jsNum
 import app.kakie.lib.maskVpa
 import app.kakie.ui.Ask
+import app.kakie.ui.AskR
 import app.kakie.ui.CardBill
+import app.kakie.ui.DeveloperR
+import app.kakie.ui.ProR
 import app.kakie.ui.Avatar
 import app.kakie.ui.Fonts
 import app.kakie.ui.Icon
@@ -75,6 +79,8 @@ fun ProfileScreen() {
     var editVpa by rememberSaveable { mutableStateOf(false) }
     var vpaDraft by rememberSaveable { mutableStateOf("") }
     var vpaError by rememberSaveable { mutableStateOf<String?>(null) }
+    var tagName by rememberSaveable { mutableStateOf("") }
+    var tagAmt by rememberSaveable { mutableStateOf("") }
 
     fun saveVpa() {
         val err = store.setVpa(vpaDraft)
@@ -209,6 +215,24 @@ fun ProfileScreen() {
             )
         }
         Txt("One number for the month. Spend under it is savings.", Fonts.body, 13, c.mut)
+        s.tagBudgets.forEach { (tag, amount) ->
+            ProfileRow("tag-outline", "#$tag", "₹${amount.toInt()} this month") {
+                Box(Modifier.press { store.setTagBudget(tag, 0.0) }) { Txt("Clear", Fonts.medium, 12.5, c.mut) }
+            }
+        }
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Input(tagName, { tagName = it }, ts(Fonts.body, 15, c.fg), Modifier.weight(1f), placeholder = "tag")
+            Input(tagAmt, { tagAmt = it.filter(Char::isDigit) }, ts(Fonts.displaySm, 18, c.fg), Modifier.width(90.dp), placeholder = "limit", keyboard = KeyboardType.Number)
+            Box(Modifier.press {
+                val tag = store.addTag(tagName)
+                val n = tagAmt.toDoubleOrNull() ?: 0.0
+                if (tag != null && n > 0) {
+                    store.setTagBudget(tag, n)
+                    tagName = ""
+                    tagAmt = ""
+                }
+            }.height(36.dp).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) { Txt("Add", Fonts.medium, 13, c.fg) }
+        }
 
         Label("On this phone")
         Box(Modifier.press { nav.push(CardBill) }) { ProfileRow("credit-card-outline", "Credit card bill", "What each card still owes") }
@@ -228,6 +252,17 @@ fun ProfileScreen() {
             Fonts.body, 12.5, c.mut, Modifier.padding(top = 10.dp), lineHeight = 18,
         )
 
+        if (store.signedIn && s.pro) {
+            Box(Modifier.press { nav.push(AskR) }) { ProfileRow("comment-question-outline", "Ask", if (s.digest) "Sunday digest is on" else "A question about this phone's spending") }
+            ProfileRow("calendar-week", "Sunday digest", "One Pro answer each Sunday") {
+                NativeSwitch(s.digest, store::setDigest)
+            }
+        }
+        if (store.signedIn && !s.pro) {
+            Box(Modifier.press { nav.push(ProR) }) { ProfileRow("star-outline", "Kakei Pro", "Backup, Ask, and a remote MCP") }
+        }
+        Box(Modifier.press { nav.push(DeveloperR) }) { ProfileRow("server-outline", "MCP server", if (s.dev.mcp) "On. Your data is served from this phone" else "Serve your data from this phone") }
+
         Label("Sample data")
         if (store.hasSample) {
             Box(Modifier.press { store.clearSample() }) { ProfileRow("broom", "Clear sample data", "Removes sample groups, expenses and SMS") }
@@ -235,7 +270,20 @@ fun ProfileScreen() {
             Box(Modifier.press { store.loadSample() }) { ProfileRow("flask-outline", "Load sample data", "Three groups and a month of spends to explore") }
         }
 
-        Box(Modifier.padding(top = 28.dp).press(onPress = ::signOut)) { Txt("Sign out", Fonts.medium, 15, c.neg) }
+        if (store.signedIn) {
+            Box(Modifier.press {
+                scope.launch {
+                    runCatching { store.downloadAccount() }
+                    store.flash("Account data downloaded")
+                }
+            }) { ProfileRow("download-outline", "Download my data", "Groups and shared expenses stored for this account") }
+            Box(Modifier.press {
+                ask(Ask("Delete this account?", "Shared groups move to someone else in them. Expenses on this phone stay here.", "Delete account", destructive = true) {
+                    scope.launch { store.deleteAccount("")?.let(store::flash) }
+                })
+            }) { Txt("Delete account", Fonts.medium, 15, c.neg) }
+        }
+        Box(Modifier.padding(top = 28.dp).press(onPress = ::signOut)) { Txt(if (store.signedIn) "Sign out" else "Erase everything on this phone", Fonts.medium, 15, c.neg) }
         Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon("lock-outline", 18, c.mut)
             Txt(

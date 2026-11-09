@@ -47,6 +47,7 @@ import app.kakie.KakieApp
 import app.kakie.lib.SmsError
 import app.kakie.lib.cleanVpa
 import app.kakie.ui.Back
+import app.kakie.ui.ResetR
 import app.kakie.ui.Body
 import app.kakie.ui.Button
 import app.kakie.ui.Enter
@@ -57,6 +58,7 @@ import app.kakie.ui.Ghost
 import app.kakie.ui.Haptic
 import app.kakie.ui.Icon
 import app.kakie.ui.LocalInsets
+import app.kakie.ui.LocalNav
 import app.kakie.ui.LocalReduceMotion
 import app.kakie.ui.LocalStore
 import app.kakie.ui.Soft
@@ -203,6 +205,7 @@ fun OnboardingScreen() {
 @Composable
 private fun ColumnScope.Account(mode: String, setMode: (String) -> Unit, back: () -> Unit) {
     val store = LocalStore.current
+    val nav = LocalNav.current
     val scope = rememberCoroutineScope()
     var name by rememberSaveable { mutableStateOf("") }
     var phone by rememberSaveable { mutableStateOf("") }
@@ -287,6 +290,7 @@ private fun ColumnScope.Account(mode: String, setMode: (String) -> Unit, back: (
             Spacer(Modifier.weight(1f))
             Dots(3)
             Button(if (busy) "One sec" else if (signup) "Create account" else "Log in", ::submit, disabled = busy)
+            if (!signup) Ghost("Forgot password") { nav.push(ResetR) }
             Ghost(if (signup) "I already have an account" else "New here? Make an account") {
                 error = null
                 setMode(if (signup) "login" else "signup")

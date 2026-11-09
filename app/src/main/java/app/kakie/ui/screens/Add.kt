@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +69,12 @@ fun AddScreen() {
     var note by rememberSaveable { mutableStateOf("") }
     var tag by rememberSaveable { mutableStateOf<String?>(null) }
     var rail by rememberSaveable { mutableStateOf(Rail.UPI) }
+    LaunchedEffect(Unit) {
+        if (store.openRail == "cash") {
+            rail = Rail.CASH
+            store.openRail = null
+        }
+    }
     var rec by rememberSaveable { mutableStateOf(false) }
     var freq by rememberSaveable { mutableStateOf("monthly") }
     var bill by rememberSaveable { mutableStateOf(false) }

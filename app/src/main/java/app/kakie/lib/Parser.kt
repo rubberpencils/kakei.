@@ -1,5 +1,7 @@
 package app.kakie.lib
 
+import kotlinx.serialization.Serializable
+
 data class ParsedSms(
     val bank: String,
     val amount: Double,
@@ -131,3 +133,17 @@ fun parseSms(sender: String, body: String): ParsedSms? {
         at = parseWhen(body),
     )
 }
+
+@Serializable
+data class MerchantRule(val key: String, val tag: String? = null, val groupId: String? = null)
+
+@Serializable
+data class DevSettings(
+    val mcp: Boolean = false,
+    val lan: Boolean = false,
+    val port: Int = 8765,
+    val token: String = "",
+    val remote: Boolean = false,
+    val remoteId: String = "",
+    val remoteToken: String = "",
+)

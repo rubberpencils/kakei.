@@ -7,6 +7,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import app.kakie.BuildConfig
+import app.kakie.sms.FileAction
+import app.kakie.sms.McpHost
+import app.kakie.sms.SmsBus
+import app.kakie.sms.SmsInbox
+import app.kakie.sms.SmsReceiver
+import app.kakie.sms.isPersonalSender
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -20,7 +26,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -58,6 +67,11 @@ data class Local(
     val cleaned: Boolean = false,
     val pro: Boolean = false,
     val askOk: Boolean = false,
+    val digest: Boolean = false,
+    val sunday: String = "",
+    val alerted: List<String> = emptyList(),
+    val rules: List<MerchantRule> = emptyList(),
+    val dev: DevSettings = DevSettings(),
     val queue: List<Draft> = emptyList(),
     val seen: List<String> = emptyList(),
     val smsOn: Boolean = false,
@@ -227,6 +241,7 @@ class Store(filesDir: File, private val device: Device) {
         private set
     var toast by mutableStateOf("")
         private set
+    var openRail: String? = null
     var sync by mutableStateOf(SyncState.IDLE)
         private set
 
@@ -237,12 +252,18 @@ class Store(filesDir: File, private val device: Device) {
     val hasSample get() = s.groups.any { it.sample == true } || s.expenses.any { it.sample } || s.queue.any { it.sample }
 
     private var toastJob: Job? = null
+    private var sessionPassword: String? = null
     private var busy = false
     private var again = false
     private var resumedOnce = false
     private var active = true
 
     init {
+        SmsBus.onSms = { scope.launch { scan() } }
+        McpHost.answer = { body ->
+            val x = s
+            handleMcp(body, McpData(x.you, x.people, x.groups, x.expenses, x.settlements, x.budget))
+        }
         scope.launch {
             val saved = withContext(disk) { runCatching { json.decodeFromString<Local>(file.readFully().decodeToString()) }.getOrNull() }
             s = if (saved != null) saved.copy(base = reachFromDevice(saved.base)) else Local(base = reachFromDevice(BuildConfig.API_URL))
@@ -299,9 +320,18 @@ class Store(filesDir: File, private val device: Device) {
     }
 
     private suspend fun scan() {
-        if (!s.smsOn) return
-        val res = device.readSms(80, quiet = true)
-        if (res.rows.isNotEmpty()) s = addDrafts(s, res.rows).first
+        val live = SmsInbox.drain(device.appContext).filter { !isPersonalSender(it.sender) }
+        val actions = SmsInbox.drainActions(device.appContext)
+        var next = s
+        if (live.isNotEmpty()) next = addDrafts(next, live.map { InboxRow(it.sender, it.body, it.date) }).first
+        if (s.smsOn) {
+            val res = device.readSms(80, quiet = true)
+            val rows = res.rows.filter { !isPersonalSender(it.sender) }
+            if (rows.isNotEmpty()) next = addDrafts(next, rows).first
+        }
+        if (actions.isNotEmpty()) next = applyFileActions(next, actions)
+        if (next !== s) s = next
+        notes()
     }
 
     fun flash(m: String) {
@@ -332,6 +362,9 @@ class Store(filesDir: File, private val device: Device) {
             history = x.history,
             tagBudgets = x.tagBudgets,
             lock = x.lock,
+            rules = x.rules,
+            dev = x.dev,
+            digest = x.digest,
             expenses = x.expenses.filter { it.groupId == null },
             you = x.you,
             local = true,
@@ -404,6 +437,16 @@ class Store(filesDir: File, private val device: Device) {
                 val keep = if (x.you.id == you.id) x else Local(queue = x.queue, seen = x.seen, smsOn = x.smsOn)
                 s = keep.copy(base = base, token = token, you = person(you.id, you.name), phone = you.phone)
             }
+            sessionPassword = body["password"]
+            sessionPassword?.let { pass ->
+                runCatching {
+                    val packed = call(base, token, "GET", "/backup").jsonObject
+                    val wrap = packed["wrap"]?.jsonPrimitive?.content
+                    val blob = packed["blob"]?.jsonPrimitive?.content
+                    if (wrap != null && blob != null) s = absorb(s, openBackup(wrap, blob, pass))
+                }
+                runCatching { pushBackup() }
+            }
             null
         } catch (e: CancellationException) {
             throw e
@@ -444,6 +487,8 @@ class Store(filesDir: File, private val device: Device) {
 
     fun setSmsOn(on: Boolean) {
         s = s.copy(smsOn = on)
+        SmsInbox.setNotify(device.appContext, on)
+        SmsInbox.setTags(device.appContext, s.rules.mapNotNull { r -> r.tag?.let { r.key to it } }.toMap())
     }
 
     fun setName(name: String) {
@@ -527,6 +572,8 @@ class Store(filesDir: File, private val device: Device) {
         reflect: Boolean? = null,
         shares: Map<String, Double>? = null,
         payerId: String? = null,
+        payers: List<SharePayer>? = null,
+        items: List<LineItem>? = null,
     ) {
         val x = s
         val d = x.queue.find { it.id == id } ?: return
@@ -545,6 +592,8 @@ class Store(filesDir: File, private val device: Device) {
             payerId = if (group != null) payerId ?: x.you.id else null,
             shares = if (group != null) shares ?: equalShares(d.amount, members) else null,
             reflect = if (group != null) reflect != false else true,
+            payers = payers,
+            items = items,
             bank = d.bank,
             account = d.account,
             sample = d.sample,
@@ -719,4 +768,202 @@ class Store(filesDir: File, private val device: Device) {
         s = next.copy(queue = next.queue.filter { !it.sample })
         flash("Sample data cleared")
     }
+
+    fun focusDraft(id: String) {
+        val i = s.queue.indexOfFirst { it.id == id }
+        if (i <= 0) return
+        val item = s.queue[i]
+        s = s.copy(queue = listOf(item) + s.queue.filterIndexed { index, _ -> index != i })
+    }
+
+    fun setDigest(on: Boolean) { s = s.copy(digest = on) }
+
+    fun setDev(next: DevSettings) { s = s.copy(dev = next) }
+
+    suspend fun requestCode(phone: String, purpose: String): String? = try {
+        call(s.base, null, "POST", "/auth/otp", JsonObject(mapOf("phone" to JsonPrimitive(phone), "purpose" to JsonPrimitive(purpose))))
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not send the code" }
+
+    suspend fun resetPassword(phone: String, code: String, password: String): String? = try {
+        call(s.base, null, "POST", "/auth/reset", JsonObject(mapOf(
+            "phone" to JsonPrimitive(phone), "otp" to JsonPrimitive(code), "password" to JsonPrimitive(password),
+        )))
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not reset the password" }
+
+    suspend fun confirmPlay(purchaseToken: String, productId: String): String? = try {
+        call(s.base, s.token, "POST", "/billing/play", JsonObject(mapOf(
+            "purchaseToken" to JsonPrimitive(purchaseToken), "productId" to JsonPrimitive(productId),
+        )))
+        syncAwait()
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not verify the purchase" }
+
+    suspend fun saveBackup(password: String): String? = try {
+        sessionPassword = password
+        pushBackup()
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not back up" }
+
+    suspend fun downloadAccount(): JsonElement = call(s.base, s.token, "GET", "/account/export")
+
+    suspend fun deleteAccount(password: String): String? = try {
+        call(s.base, s.token, "POST", "/account/delete", JsonObject(mapOf("password" to JsonPrimitive(password))))
+        sessionPassword = null
+        signOutLocal()
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not delete the account" }
+
+    suspend fun allowAsk(): String? {
+        s = s.copy(askOk = true)
+        return try {
+            call(s.base, s.token, "POST", "/ai/ask", buildJsonObject { put("consent", true) })
+            null
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not save" }
+    }
+
+    suspend fun askQuestion(question: String): String {
+        var history = JsonArray(emptyList())
+        var text = ""
+        repeat(4) { i ->
+            val body = buildJsonObject {
+                put("consent", true)
+                if (i == 0) put("question", question)
+                put("history", history)
+            }
+            val res = call(s.base, s.token, "POST", "/ai/ask", body).jsonObject
+            res["history"]?.let { history = it.jsonArray }
+            res["text"]?.jsonPrimitive?.contentOrNull?.let { text = it }
+            val calls = res["toolCalls"]?.jsonArray ?: return text.ifEmpty { "No answer" }
+            if (calls.isEmpty()) return text.ifEmpty { "No answer" }
+            val x = s
+            val parts = JsonArray(calls.map { el ->
+                val call = el.jsonObject
+                val name = call["name"]?.jsonPrimitive?.content.orEmpty()
+                val args = call["args"]?.toString() ?: "{}"
+                val rpc = """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$name","arguments":$args}}"""
+                val ran = handleMcp(rpc, McpData(x.you, x.people, x.groups, x.expenses, x.settlements, x.budget))
+                buildJsonObject { put("functionResponse", buildJsonObject { put("name", name); put("response", json.parseToJsonElement(ran.body)) }) }
+            })
+            history = JsonArray(history + buildJsonObject { put("role", "user"); put("parts", parts) })
+        }
+        return text.ifEmpty { "No answer" }
+    }
+
+    suspend fun createRemote(): String? = try {
+        val res = call(s.base, s.token, "POST", "/mcp/create", buildJsonObject { put("confirm", true) }).jsonObject
+        val token = res.getValue("token").jsonPrimitive.content
+        val id = res.getValue("publicId").jsonPrimitive.content
+        s = s.copy(dev = s.dev.copy(remote = true, remoteId = id, remoteToken = token))
+        pushSnapshot()
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not create the remote MCP" }
+
+    suspend fun setRemote(on: Boolean): String? = try {
+        call(s.base, s.token, "POST", if (on) "/mcp/enable" else "/mcp/disable")
+        s = s.copy(dev = s.dev.copy(remote = on))
+        null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "Could not update the remote MCP" }
+
+    fun connect() { if (s.local) s = s.copy(connecting = true) }
+
+    fun syncMcp() {
+        val d = s.dev
+        if (d.mcp && entered && d.token.length >= 16) {
+            runCatching { McpHost.start(device.appContext, d.port, d.token, d.lan) }
+        } else {
+            McpHost.stop(device.appContext)
+        }
+    }
+
+    private fun notes() {
+        val ctx = device.appContext
+        val now = java.time.LocalDate.now()
+        if (now.dayOfWeek == java.time.DayOfWeek.SUNDAY) {
+            val day = now.toString()
+            if (s.sunday != day) {
+                val bounds = monthBounds(now.year, now.monthValue)
+                val spent = spendIn(s.expenses, s.settlements, s.you.id, bounds.from, bounds.to)
+                val left = kotlin.math.round((s.budget) - spent.total).toInt()
+                SmsReceiver.note(ctx, "This Sunday", "Spent ₹${kotlin.math.round(spent.total).toInt()}. Left ₹$left.", 7)
+                s = s.copy(sunday = day)
+                if (s.pro && s.digest && s.askOk && s.token != null) {
+                    scope.launch {
+                        runCatching {
+                            val res = call(s.base, s.token, "POST", "/ai/ask", buildJsonObject {
+                                put("consent", true)
+                                put("question", "In one short paragraph, how is this month going?")
+                            }).jsonObject
+                            res["text"]?.jsonPrimitive?.contentOrNull?.let { SmsReceiver.note(ctx, "Sunday digest", it.take(180), 8) }
+                        }
+                    }
+                }
+            }
+        }
+        val month = "${now.year}-${pad(now.monthValue)}"
+        val fresh = s.tagBudgets.filter { (tag, limit) ->
+            val key = "$month:$tag"
+            limit > 0 && key !in s.alerted && tagSpend(s.expenses, s.you.id, tag, "$month-01", "$month-31") >= limit
+        }
+        if (fresh.isNotEmpty()) {
+            s = s.copy(alerted = (s.alerted + fresh.keys.map { "$month:$it" }).takeLast(200))
+            fresh.forEach { (tag, limit) -> SmsReceiver.note(ctx, "#$tag budget", "Spending on $tag crossed ₹${limit.toInt()} this month.", tag.length) }
+        }
+    }
+
+    private suspend fun pushBackup() {
+        val pass = sessionPassword ?: return
+        if (s.token == null || !s.pro) return
+        val packed = sealBackup(BackupPayload(s.expenses, s.settlements, s.groups, s.people, s.budget, s.tags, s.rules, s.history, s.tagBudgets), pass)
+        call(s.base, s.token, "POST", "/backup", buildJsonObject { put("wrap", packed.wrap); put("blob", packed.blob) })
+    }
+
+    private suspend fun pushSnapshot() {
+        if (s.token == null || !s.pro || !s.dev.remote) return
+        val body = buildJsonObject {
+            put("budget", s.budget)
+        }
+        runCatching { call(s.base, s.token, "POST", "/mcp/snapshot", body) }
+    }
+}
+
+private fun applyFileActions(s: Local, actions: List<FileAction>): Local {
+    var next = s
+    for (a in actions) {
+        if (a.kind == "drop") {
+            next = next.copy(queue = next.queue.filter { it.id != a.id })
+            continue
+        }
+        val d = next.queue.find { it.id == a.id } ?: continue
+        if (d.amount <= 0) continue
+        val tag = slugTag(a.tag).ifEmpty { d.tag }
+        val expense = Expense(
+            id = uid(), merchant = d.merchant.ifEmpty { "Payment" }, amount = d.amount, at = d.at, tag = tag, rail = d.rail,
+            income = d.income, transfer = d.transfer, bank = d.bank, account = d.account,
+        )
+        val tags = if (tag != null && tag !in next.tags) next.tags + tag else next.tags
+        val key = d.merchant.trim().lowercase()
+        val rules = if (tag != null && key.isNotEmpty()) next.rules.filter { it.key != key } + MerchantRule(key, tag) else next.rules
+        next = enqueue(next.copy(tags = tags, rules = rules, queue = next.queue.filter { it.id != a.id }), listOf(ExpenseUpsert(expense)))
+    }
+    return next
+}
+
+private fun absorb(cur: Local, data: BackupPayload): Local {
+    val personal = linkedMapOf<String, Expense>()
+    data.expenses.filter { it.groupId == null }.forEach { personal[it.id] = it }
+    cur.expenses.filter { it.groupId == null }.forEach { personal[it.id] = it }
+    return cur.copy(
+        expenses = personal.values.toList() + cur.expenses.filter { it.groupId != null } +
+            data.expenses.filter { it.groupId != null && cur.expenses.none { e -> e.id == it.id } },
+        groups = cur.groups + data.groups.filter { g -> cur.groups.none { it.id == g.id } },
+        people = cur.people + data.people.filter { p -> p.id != cur.you.id && cur.people.none { it.id == p.id } },
+        settlements = cur.settlements + data.settlements.filter { st -> cur.settlements.none { it.id == st.id } },
+        budget = if (cur.budget != 0.0) cur.budget else data.budget,
+        tags = (cur.tags + data.tags).distinct(),
+        rules = cur.rules.ifEmpty { data.rules },
+        history = cur.history.ifEmpty { data.history },
+        tagBudgets = data.tagBudgets + cur.tagBudgets,
+    )
 }

@@ -80,6 +80,9 @@ fun SplitScreen(route: Split) {
     var pct by rememberSaveable { mutableStateOf(mapOf<String, String>()) }
     var reflect by rememberSaveable { mutableStateOf(editing?.reflect ?: route.reflect) }
     var tag by rememberSaveable { mutableStateOf(editing?.tag ?: route.tag?.ifEmpty { null }) }
+    var multiPaid by rememberSaveable { mutableStateOf(!editing?.payers.isNullOrEmpty()) }
+    var paid by rememberSaveable { mutableStateOf(editing?.payers?.associate { it.id to jsNum(it.amount) } ?: emptyMap()) }
+    var itemText by rememberSaveable { mutableStateOf(editing?.items?.joinToString("\n") { "${it.name}|${jsNum(it.amount)}" } ?: "") }
 
     if (group == null) {
         Column(Modifier.fillMaxSize().background(c.bg).padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = insets.top + 8.dp)) {
@@ -101,8 +104,17 @@ fun SplitScreen(route: Split) {
     }
     val sum = shares.values.sum()
     val pctSum = included.sumOf(::pctOf)
+    val payers = if (multiPaid) members.map { id -> app.kakie.lib.SharePayer(id, paid[id]?.toDoubleOrNull() ?: 0.0) }.filter { it.amount > 0 } else null
+    val itemRows = itemText.lines().mapNotNull { line ->
+        val name = line.substringBefore("|").trim()
+        val value = line.substringAfter("|", "").toDoubleOrNull() ?: return@mapNotNull null
+        if (name.isEmpty() || value <= 0) null else app.kakie.lib.LineItem(name, value, included)
+    }
+    val paidOk = payers == null || abs(payers.sumOf { it.amount } - amount) < 0.5
+    val itemsOk = itemRows.isEmpty() || abs(itemRows.sumOf { it.amount } - amount) < 0.5
+    val lead = payers?.maxByOrNull { it.amount }?.id ?: payer
     val balanced = mode == "equal" || (if (mode == "exact") abs(sum - amount) < 0.5 else abs(pctSum - 100) < 0.5)
-    val ok = amount > 0 && included.isNotEmpty() && balanced
+    val ok = amount > 0 && included.isNotEmpty() && balanced && paidOk && itemsOk
     fun name(id: String) = if (id == s.you.id) "You" else s.people.find { it.id == id }?.name ?: "Someone"
     val status = when {
         included.isEmpty() -> "Pick at least one person"
@@ -116,17 +128,17 @@ fun SplitScreen(route: Split) {
         buzz(Haptic.DONE)
         when {
             editing != null -> {
-                store.updateExpense(editing.copy(merchant = desc.trim().ifEmpty { editing.merchant }, amount = amount, tag = tag, payerId = payer, shares = shares, reflect = reflect))
+                store.updateExpense(editing.copy(merchant = desc.trim().ifEmpty { editing.merchant }, amount = amount, tag = tag, payerId = lead, shares = shares, reflect = reflect, payers = payers, items = itemRows.ifEmpty { null }))
                 store.flash("Split updated")
             }
             draft != null -> {
-                store.confirmDraft(draft.id, tag, group.id, reflect, shares, payer)
+                store.confirmDraft(draft.id, tag, group.id, reflect, shares, lead, payers, itemRows.ifEmpty { null })
                 store.flash("Split saved")
             }
             else -> store.addExpense(
                 Expense(
                     id = "", merchant = desc.trim().ifEmpty { "Group expense" }, amount = amount, at = nowIso(), tag = tag, rail = Rail.UPI,
-                    groupId = group.id, payerId = payer, shares = shares, reflect = reflect,
+                    groupId = group.id, payerId = lead, shares = shares, reflect = reflect, payers = payers, items = itemRows.ifEmpty { null },
                 ),
             )
         }
@@ -159,6 +171,23 @@ fun SplitScreen(route: Split) {
         Label("Paid by", Modifier.padding(top = 16.dp, bottom = 8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             members.forEach { id -> Chip(name(id), payer == id, { payer = id }) }
+        }
+        Box(Modifier.padding(top = 12.dp).press { multiPaid = !multiPaid }) {
+            Txt(if (multiPaid) "One person paid" else "More than one person paid", Fonts.medium, 13, c.acc)
+        }
+        if (multiPaid) {
+            members.forEach { id ->
+                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Txt(name(id), Fonts.body, 14, c.fg, Modifier.weight(1f))
+                    Input(paid[id] ?: "", { paid = paid + (id to numeric(it)) }, ts(Fonts.displaySm, 16, c.fg, align = TextAlign.End), Modifier.width(90.dp), placeholder = "0", keyboard = KeyboardType.Decimal)
+                }
+            }
+        }
+        Box(Modifier.padding(top = 14.dp).press { itemText = if (itemText.isEmpty()) "|" else "$itemText\n|" }) {
+            Txt("Add an item", Fonts.medium, 13, c.acc)
+        }
+        if (itemText.isNotEmpty()) {
+            Input(itemText, { itemText = it }, ts(Fonts.body, 15, c.fg), Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = "name|amount, one item a line", singleLine = false)
         }
         Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip("Equally", mode == "equal", { mode = "equal" })

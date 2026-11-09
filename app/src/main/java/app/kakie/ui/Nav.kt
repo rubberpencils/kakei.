@@ -60,7 +60,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import app.kakie.lib.Store
 import app.kakie.ui.screens.BalancesScreen
+import app.kakie.ui.screens.AskScreen
 import app.kakie.ui.screens.CardBillScreen
+import app.kakie.ui.screens.DeveloperScreen
+import app.kakie.ui.screens.ProScreen
+import app.kakie.ui.screens.ResetScreen
 import app.kakie.ui.screens.AddScreen
 import app.kakie.ui.screens.ExpenseScreen
 import app.kakie.ui.screens.GroupScreen
@@ -99,6 +103,10 @@ import kotlinx.serialization.Serializable
 @Serializable data class BalancesR(val side: String = "owed")
 @Serializable data object CardBill
 @Serializable data class QuickSplitR(val draftId: String? = null, val expenseId: String? = null, val tag: String? = null)
+@Serializable data object ProR
+@Serializable data object AskR
+@Serializable data object ResetR
+@Serializable data object DeveloperR
 
 enum class Tab(val label: String, val icon: String, val on: String) {
     HOME("Home", "home-outline", "home"),
@@ -250,6 +258,10 @@ private fun AppNav(store: Store, reduce: Boolean) {
             composable<BalancesR> { BalancesScreen(it.toRoute()) }
             composable<CardBill> { CardBillScreen() }
             composable<QuickSplitR> { QuickSplitScreen(it.toRoute()) }
+            composable<ProR> { ProScreen() }
+            composable<AskR> { AskScreen() }
+            composable<ResetR> { ResetScreen() }
+            composable<DeveloperR> { DeveloperScreen() }
         }
     }
 
@@ -292,6 +304,14 @@ private fun openLink(uri: Uri, store: Store, nav: Nav) {
     val q = query(uri)
     when (uri.host ?: uri.path?.trim('/')) {
         "join" -> nav.push(Join(q["code"]?.uppercase()))
+        "review" -> {
+            q["id"]?.let(store::focusDraft)
+            nav.push(Review)
+        }
+        "add" -> {
+            store.openRail = q["rail"]
+            nav.push(Add)
+        }
         "sms" -> {
             val text = q["text"]
             val ok = text != null && store.ingestText(text, q["sender"] ?: "Shortcuts")

@@ -20,6 +20,13 @@ data class YouNet(val owed: Double, val owe: Double, val net: Double)
 /** Per expense, per person: what they still owe the payer after settlements. */
 typealias Remaining = Map<String, Map<String, Double>>
 
+fun tagSpend(expenses: List<Expense>, youId: String, tag: String, from: String, to: String): Double {
+    val rem = remainingOwed(expenses, emptyList())
+    return round2(expenses.sumOf { e ->
+        if (e.tag != tag || e.income || e.transfer || !inRange(e.at, from, to)) 0.0 else pocket(e, youId, rem)
+    })
+}
+
 fun round2(n: Double) = jsRound(n * 100) / 100.0
 
 fun equalShares(amount: Double, ids: List<String>): Map<String, Double> {
