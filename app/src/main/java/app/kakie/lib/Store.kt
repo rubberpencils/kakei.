@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -301,6 +302,7 @@ class Store(filesDir: File, private val device: Device) {
                     val woke = runCatching { call(s.base, token, "GET", "/sync/wait?after=$after", timeout = 30_000) }.isSuccess
                     if (!woke) delay(5_000)
                     if (active) syncNow()
+                if (s.pro && s.dev.remote) pushSnapshot()
                 }
             }
         }
@@ -922,6 +924,11 @@ class Store(filesDir: File, private val device: Device) {
     private suspend fun pushSnapshot() {
         if (s.token == null || !s.pro || !s.dev.remote) return
         val body = buildJsonObject {
+            put("you", json.encodeToJsonElement(Person.serializer(), s.you.copy(vpa = null)))
+            put("people", json.encodeToJsonElement(ListSerializer(Person.serializer()), s.people.map { it.copy(vpa = null) }))
+            put("groups", json.encodeToJsonElement(ListSerializer(Group.serializer()), s.groups))
+            put("expenses", json.encodeToJsonElement(ListSerializer(Expense.serializer()), s.expenses.filter { !it.sample }.map { it.copy(account = null, bank = null) }))
+            put("settlements", json.encodeToJsonElement(ListSerializer(Settlement.serializer()), s.settlements))
             put("budget", s.budget)
         }
         runCatching { call(s.base, s.token, "POST", "/mcp/snapshot", body) }

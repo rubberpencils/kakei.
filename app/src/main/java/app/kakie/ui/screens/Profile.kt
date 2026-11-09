@@ -81,6 +81,7 @@ fun ProfileScreen() {
     var vpaError by rememberSaveable { mutableStateOf<String?>(null) }
     var tagName by rememberSaveable { mutableStateOf("") }
     var tagAmt by rememberSaveable { mutableStateOf("") }
+    var deletePass by rememberSaveable { mutableStateOf("") }
 
     fun saveVpa() {
         val err = store.setVpa(vpaDraft)
@@ -277,9 +278,11 @@ fun ProfileScreen() {
                     store.flash("Account data downloaded")
                 }
             }) { ProfileRow("download-outline", "Download my data", "Groups and shared expenses stored for this account") }
+            Input(deletePass, { deletePass = it }, ts(Fonts.body, 15, c.fg), Modifier.fillMaxWidth().padding(top = 8.dp), placeholder = "Password to delete the account", secure = true)
             Box(Modifier.press {
+                val password = deletePass
                 ask(Ask("Delete this account?", "Shared groups move to someone else in them. Expenses on this phone stay here.", "Delete account", destructive = true) {
-                    scope.launch { store.deleteAccount("")?.let(store::flash) }
+                    scope.launch { store.deleteAccount(password)?.let(store::flash) }
                 })
             }) { Txt("Delete account", Fonts.medium, 15, c.neg) }
         }
