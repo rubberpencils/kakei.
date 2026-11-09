@@ -46,6 +46,13 @@ example
 /ios
 /android
 
+# Kotlin / Gradle
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+
 # native module build output
 modules/*/android/build/
 modules/*/android/.gradle/

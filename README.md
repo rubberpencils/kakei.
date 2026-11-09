@@ -2,6 +2,7 @@
 
 A privacy focused expense ledger that turns bank SMS into spends, then splits them with friends. Your money stays on your phone.
 
+The phone app is native Android, written in Kotlin and Jetpack Compose. The API stays in `server/`.
 
 ## Screenshots
 
@@ -13,7 +14,7 @@ A privacy focused expense ledger that turns bank SMS into spends, then splits th
     <td align="center"><img src="docs/screenshots/08-insights.png" width="200" alt="Insights" /><br /><sub>Insights</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/09-add.png" width="200" alt="Add an expense" /><br /><sub>Add, with the built-in keyboard</sub></td>
+    <td align="center"><img src="docs/screenshots/09-add.png" width="200" alt="Add an expense" /><br /><sub>Add</sub></td>
     <td align="center"><img src="docs/screenshots/10-group.png" width="200" alt="Group" /><br /><sub>A group</sub></td>
     <td align="center"><img src="docs/screenshots/11-balances.png" width="200" alt="Balances" /><br /><sub>Who owes what</sub></td>
     <td align="center"><img src="docs/screenshots/12-profile.png" width="200" alt="Profile" /><br /><sub>Profile and privacy</sub></td>
@@ -23,175 +24,132 @@ A privacy focused expense ledger that turns bank SMS into spends, then splits th
 ## Features
 
 **Spends from bank SMS**
+
 - Reads bank, card and wallet messages on the phone and turns each into an expense: amount, merchant, date, rail (UPI, debit, credit, IMPS, NEFT) and a suggested tag.
-- You confirm every entry before it is saved. OTPs and personal chats are skipped.
-- A message with ` CC ` in it is a credit card spend. Paying the card off is a transfer, not spend.
-- Android reads the inbox directly. On iOS, a Shortcuts automation hands messages to Kakei.
+- You confirm every entry before it is saved. OTPs and messages from phone numbers are skipped.
+- A new bank message can post a notification. File, Other, or Not mine applies when you next open kakie.
+- Paying a credit card off is a transfer, not a second spend. Card bills show what is still due, in full or in part.
 
 **Your own money**
-- Home with this month's spend against your budget, Personal with a day-by-day timeline, Insights with charts by tag, and search across everything.
-- Credit card spends add themselves to that card's bill. **Card bills** shows what is due per card and takes full or partial payments.
-- Monthly history is kept so you can compare months.
+
+- Home shows this month against the budget. Personal is a day-by-day timeline. Insights charts spend by tag. Search covers the ledger.
+- A monthly budget, and an optional limit on any tag. Crossing a tag limit posts a note.
+- The cash widget opens Add already set to cash.
 
 **Splitting and groups**
+
 - Spend counts your share only. Money you paid for friends and have not got back shows separately.
-- **Quick split** for a one-off bill. **Groups** for a trip, a flat or Friday lunches, with one running balance.
-- Make a group from any expense, or add an expense to a group while you add it, and pick who paid.
-- **Balances** lists what each person owes you and what you owe, by person and by group.
-- **Settle up** is prefilled with the full amount. Edit it to pay part. Kakei does not move money, you pay however you like and mark it paid.
-- Groups can be shared by code, so friends see the same balances.
+- A quick split is one bill. A group is many bills over time, with one running balance.
+- More than one person can have paid, and a bill can be broken into items.
+- Balances lists who owes you and who you owe, by person and by group.
+- Settle up records a payment. kakie does not move the money.
+- Friends join with a code and see the same balances.
 
-**Typing**
-- Amounts on the log screen use the built-in number pad. Everything else uses the phone keyboard, so the back gesture dismisses the keyboard.
+**Account, Pro, and Ask**
 
-**Developer**
-- Turn the phone into a read-only [MCP](https://modelcontextprotocol.io) server so Cursor, Claude Desktop or any HTTP MCP client can ask about your spending. See [MCP server on your phone](#mcp-server-on-your-phone).
-
-## Free and Pro
-
-One Play build. Self-hosting sets every account to Pro and never opens the paywall, so BillingClient is not constructed. The hosted server sets `KAKEI_EVERYONE_PRO=false` and `GOOGLE_SA_JSON`. Without that JSON, `POST /billing/play` answers 501. A sideloaded APK cannot finish a Play purchase.
-
-Free, including with no account: bank SMS, review, budgets, splits, export, lock, and the cash widget. An account is a phone number and a password. Resetting that password can send a code. Pro, because it costs hosting or a paid model: the encrypted backup, Ask, the Sunday AI digest, and remote MCP. A self-hosted server marks every account Pro, and the profile shows a Pro badge.
+- The ledger works with no account. Profile can turn on sync when you want groups on more than one phone.
+- Resetting a password texts a code. A self-hosted server prints that code in its log.
+- Pro is a Play subscription: encrypted backup, Ask, the Sunday digest, and a remote MCP. A self-hosted server marks every account Pro.
+- Ask answers a question about spending on this phone. The question and the tool results go to the model. SMS text does not. Ask and the Sunday digest share 30 answers a month.
 
 ## Where your data lives
 
-Kakei is local first. It works fully with no account and no server.
+kakie is local first. It works with no account and no server.
 
-| On the phone only | Sealed groups the server can read | Encrypted backup | Remote MCP snapshot |
+| On the phone only | Shared, sealed on the server | Encrypted backup | Remote MCP snapshot |
 | --- | --- | --- | --- |
-| Personal expenses, budget, tags, history | Groups, members, group expenses, settlements | The whole ledger, sealed with your account password. Logging in on a new phone restores it | Amounts, merchants, tags, dates, shares |
-| Bank SMS, account digits, bank names | Your name and phone, so friends can find you | The server cannot read this blob | No SMS text, account digits or bank names |
+| Personal expenses, budget, tags, history | Groups, members, group expenses, settlements | The whole ledger, sealed with your account password | Amounts, merchants, tags, dates, shares |
+| Bank SMS, account digits, bank names | Your name and phone, so friends can find you | The server cannot read this blob | No SMS text, account digits, or bank names |
 
-- If the server is down or you are offline, Kakei keeps working. Group changes queue on the phone and send when it is back.
-- Signing out keeps your own spends, budget and tags. Only the shared groups leave the phone. Log in again, on this phone or a new one, and the backup plus the groups come back.
-- Shared expenses and settlements are sealed on the server with AES-256-GCM. Account digits and bank names are not in that sealed copy. They can sit inside the backup blob, which the server cannot read. Passwords are hashed with scrypt, and traffic is HTTPS.
-- Older versions uploaded personal spends. On the first sync after updating, the phone asks the server to forget them, but only once the phone holds its own copy.
+Group changes made offline queue on the phone and send when the server is back. Signing out keeps your own spends, budget, and tags. Shared expenses are sealed at rest with AES-256-GCM. Passwords are hashed with scrypt.
 
-The onboarding account step and Profile explain the same thing in the app.
+The first sync after an older build asks the server to forget personal spends it used to store, once this phone has its own copy.
 
 ## Money rules
 
-Kakei does not move money. UPI blocks one-tap payments from an app to a person's UPI ID (NPCI rule 7.9), so you pay however you like and tap **Mark as paid** or **Mark as received**.
+kakie does not move money. You pay however you like, then mark it paid.
 
-- **Spend is your share only.** A plain expense counts in full. A split counts only your part.
-- **Quick split.** Any expense can be split with a few people. It becomes a small split under Groups > Splits and never shows in the Home carousel.
-- **Group.** Many bills over time, one running balance.
+- A plain expense counts in full. A split counts only your part.
+- A quick split lives under Groups, then Splits. It is one bill, not a trip.
+- A group is many bills and one running balance.
 
 ## Tech
 
 | Part | What |
 | --- | --- |
-| App | Expo SDK 57, React Native 0.86, Expo Router (`src/app`), React Compiler, Reanimated |
-| State | One local-first store (`src/lib/store.tsx`) saved to AsyncStorage, with an outbox for group changes |
-| SMS | `modules/kakie-sms`, a native Android module (inbox reading and the MCP listener) |
-| Server | Node 22.18+ with built-in `node:sqlite`, no framework (`server/`) |
-| Hosting | Docker, deployed on Coolify |
+| App | Kotlin, Jetpack Compose, one activity (`app/`) |
+| State | One local-first store (`app/src/main/java/app/kakie/lib/Store.kt`), saved as a file, with an outbox for group changes |
+| SMS and MCP | `app/src/main/java/app/kakie/sms` reads the inbox, posts bank notifications, and serves MCP |
+| Server | Node 22.18+ with built-in `node:sqlite` (`server/`) |
+| Hosting | Docker, deployed on Coolify. A merge to `main` updates the host |
 
 ```
-src/app          screens (every file is a route)
-src/components   input, shared UI, privacy note
-src/lib          store, parser, ledger, keyboard logic, sync client
-modules/         native SMS and MCP module
+app/             Android app
 server/src       API, SQLite, encryption
-docs/screenshots images used in this README
+shared/          MCP tool definitions the server uses
+docs/screenshots images used above
 ```
 
 ## Run it
 
-Needs Node **22.18 or newer**.
+The app needs Android Studio's JDK. `JAVA_HOME` should be its `jbr` when `java` is not already on PATH. The server needs Node 22.18 or newer.
 
-### 1. Install
+### App
 
 ```bash
-npm install
+./gradlew :app:installDebug
+```
+
+The debug package id is `app.kakie.kt`. Release uses `app.kakie`.
+
+The default server is `https://kakei.169.58.42.62.sslip.io`. Override it with `KAKIE_API_URL` in `.env` (see `.env.example`). On the account screen or in Profile, Change points the app at another server without a new build. The hosted one is shown as Official servers.
+
+USB to a local server: `adb reverse tcp:4000 tcp:4000`, then use `localhost:4000`. On an emulator, `localhost` and `127.0.0.1` are rewritten to `10.0.2.2`.
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+### Server
+
+```bash
 npm --prefix server install
+npm --prefix server start
 ```
 
-Local config is copied from the examples (`.env` and `server/.env`). Both are gitignored.
-
-### 2. Start the server (optional)
-
-```bash
-npm run server
-```
-
-Listens on `0.0.0.0:4000`. The log line `phone URL:` is the address a phone on the same Wi-Fi should use. Reload on changes with `npm --prefix server run dev`.
-
-Copy `server/.env.example` to `server/.env`. You only have to set a key if you care about moving the database later.
+Listens on `0.0.0.0:4000`. Copy `server/.env.example` to `server/.env`.
 
 | Variable | Self-host | Hosted kakei. |
 | --- | --- | --- |
-| `KAKEI_EVERYONE_PRO` | `true` (the default). Every account is Pro. The app shows the Pro badge and does not open the paywall. | `false` |
-| `KAKEI_DATA_KEY` | Optional. 32 bytes, base64 or hex. Unset, the server writes `data.key` next to the database. Keep a copy or the sealed groups cannot be read. | Required, and backed up |
+| `KAKEI_EVERYONE_PRO` | `true` (the default). Every account is Pro. | `false` |
+| `KAKEI_DATA_KEY` | Optional. 32 bytes, base64 or hex. Unset, the server writes `data.key` next to the database. Keep a copy. | Required, and backed up |
 | `GOOGLE_SA_JSON` | Leave unset. `POST /billing/play` answers 501. | Play service-account JSON, or a path to that file |
-| `SMS_OTP_URL` | Leave unset. Password reset prints the code in the server log. Signup does not send a code. | URL that accepts `POST { phone, code }` |
+| `SMS_OTP_URL` | Leave unset. Password reset prints the code in the server log. | URL that accepts `POST { phone, code }` |
 | `GEMINI_API_KEY` | Optional. Unset, Ask answers 501. | Set, for Ask and the Sunday digest |
-| `PORT` / `HOST` | `4000` and `0.0.0.0` so a phone on the same Wi-Fi can connect | Behind your proxy, `HOST=127.0.0.1` |
+| `PORT` / `HOST` | `4000` and `0.0.0.0` | Behind your proxy, `HOST=127.0.0.1` |
 | `DB_PATH` | `./data/kakei.db` | Wherever you keep the SQLite file |
 | `CORS_ORIGIN` | `*` is fine locally | Your web origin |
 
-On the phone, account screen, tap **Change** and enter the `phone URL:` from the server log, for example `192.168.1.20:4000`. A build does not have to be remade for that. USB instead of Wi-Fi: `adb reverse tcp:4000 tcp:4000`, then use `localhost:4000`.
-
-The Play build is one APK on an internal track. A sideloaded APK cannot finish a Play purchase. Contributors build this same source and point it at their server.
-
-### 3. Start the app
-
 ```bash
-npx expo start
-```
-
-Expo Go can open the UI. It cannot read bank SMS or run the on-phone MCP server, because both go through the native module and need an installed build.
-
-### 4. Build an APK
-
-Locally:
-
-```bash
-npx expo prebuild --platform android --no-install
-cd android
-./gradlew assembleRelease
-```
-
-The APK lands in `android/app/build/outputs/apk/release/`. Add `-PreactNativeArchitectures=arm64-v8a` to build for phones only and cut build time.
-
-Or in the cloud with EAS:
-
-```bash
-npx eas-cli@latest login
-npx eas-cli@latest build --platform android --profile preview
-```
-
-Both bake in `EXPO_PUBLIC_API_URL`, currently the Coolify server `https://kakei.169.58.42.62.sslip.io`. On the account screen, **Change** points the app at another server without a new build.
-
-Ready-made APKs are on the [Releases page](../../releases).
-
-### 5. Check it
-
-```bash
-npm run check      # types, app self-check, server check
-npx tsc --noEmit
-npx expo lint
+npm --prefix server run typecheck
+npm --prefix server run check
 ```
 
 ## MCP server on your phone
 
-Profile > Developer > **MCP server** turns the phone into a read-only MCP server (Streamable HTTP, `POST /mcp`, bearer token). Answers are worked out on the phone from its own data. No cloud copy, no relay.
+Profile, then Developer, then **Serve my data over MCP** turns the phone into a read-only MCP server (`POST /mcp`, bearer token). Answers are worked out on the phone. No cloud copy.
 
-1. Turn it on. Allow the notification and the "run with the screen off" prompt. A foreground service keeps it answering after you leave the app. Do not swipe Kakei away.
-2. **USB only** (default, loopback): plug in the phone and run `adb reverse tcp:8765 tcp:8765`.
-3. **Anywhere**: listens on every network. Away from home, install [Tailscale](https://tailscale.com) on the phone and the computer and use the `100.x` address shown. It is encrypted and works on mobile data.
-4. Tap **Copy MCP config** and paste it into Cursor, Claude Desktop or any HTTP MCP client.
+1. Turn it on. Allow the notification and the "run with the screen off" prompt. A foreground service keeps it answering after you leave the app. Do not swipe kakie away.
+2. USB only (the default, loopback): plug in the phone and run `adb reverse tcp:8765 tcp:8765`.
+3. On Wi-Fi or Tailscale: turn on the reachable switch and use the address shown. Do not use a mobile-data address. Nothing outside the phone can open that.
+4. Paste the URL and bearer token into Cursor, Claude Desktop, or any HTTP MCP client.
 
 Tools: `get_summary`, `list_transactions`, `spending_by_tag`, `list_groups`, `get_balances`. Never exposed: SMS text, account numbers, phone number, password. Requests with a browser `Origin` header are refused.
 
-The phone is not opened to the public internet. Mobile networks block inbound connections, and plain HTTP over the open internet would expose the token.
+Pro can also publish a remote MCP. That snapshot is the ledger without SMS text, account digits, or bank names. The phone pushes it while remote MCP is on.
 
 ## Does it need the server?
 
-No. Kakei starts in **local mode**: no account, no server. Spending, SMS import, quick splits, card bills and the MCP server all work from the phone, and nothing is sent anywhere.
+No. Skip the account and the ledger stays on the phone. Spending, SMS import, quick splits, card bills, and the on-phone MCP server all work, and nothing is sent.
 
-The server is for sharing a group, and for the encrypted backup that puts the ledger back when you log in on a new phone or after a reinstall. Turn it on in Profile > **Sync with friends**. The backup is sealed with the account password. The server stores the blob and cannot read it.
-
-## SMS module
-
-Keep `modules/kakie-sms`. Android uses it to read the bank inbox (`readInbox`) and to run the MCP listener (`startMcp`, `stopMcp`, `mcpReply`). iOS does not read the inbox. iOS intake is the Shortcuts flow in onboarding.
+The server is for sharing a group, and for the encrypted backup that puts the ledger back when you log in on a new phone. Turn sync on from Profile. The backup is sealed with the account password. The server stores the blob and cannot read it.
